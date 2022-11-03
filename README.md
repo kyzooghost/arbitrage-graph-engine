@@ -5,3 +5,11 @@ WIP.
 Modules
 - Core arbitrage engine
 - Adaptors for each network and protocol
+
+Useful CLI commands
+
+
+Run unit tests without silencing stdout
+```
+cargo test -- --nocapture
+```
