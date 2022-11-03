@@ -10,6 +10,7 @@ Useful CLI commands
 
 
 Run unit tests without silencing stdout
+
 ```
 cargo test -- --nocapture
 ```

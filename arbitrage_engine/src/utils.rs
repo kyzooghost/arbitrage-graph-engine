@@ -5,8 +5,12 @@ mod utils_mod {
         use colored::*;
         use std::fmt::Debug;
 
-        pub fn log(name: &str, message: &dyn Debug) {
+        pub fn logObject(name: &str, message: &dyn Debug) {
             println!("{}: {:?}", name.blue(), message);
+        }
+
+        pub fn logText(test: &str) {
+            println!("{}", test.blue());
         }
     }
 }

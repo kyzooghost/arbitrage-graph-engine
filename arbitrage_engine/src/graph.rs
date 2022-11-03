@@ -1,8 +1,14 @@
 pub use graph_mod::*;
-use super::utils::logger::log;
 
 mod graph_mod {
-    use petgraph::graph::Graph;
+    use petgraph::{
+        graph::Graph,
+        prelude::{NodeIndex, EdgeIndex},
+        Direction::Outgoing,
+        visit::EdgeRef
+    };
+
+    use super::super::utils::logger::{logObject, logText};
 
     #[test]
     fn petgraph_basic_methods() {
@@ -21,8 +27,7 @@ mod graph_mod {
     }
 
     pub mod path {
-        use petgraph::prelude::{NodeIndex, EdgeIndex};
-        use super::Graph;
+        use super::{Graph, NodeIndex, EdgeIndex};
         use std::marker::PhantomData;
 
         // Choosing to store vector of indexes, rather than using a recursive type as we did in Java. Should be ok if the vectors don't grow too large.
@@ -124,5 +129,160 @@ mod graph_mod {
         }
     }
 
+    pub mod cycle {
+        use super::{Graph, path::Path, NodeIndex, EdgeIndex, Outgoing, EdgeRef, logObject, logText};
+        use std::{collections::HashMap};
 
+        // DFS algorithm to determine if a cycle exists in a graph, linear time algorithm: O(V + E).
+        // Returns tuple
+        // tuple.0 (bool): false if no cycle found, true if cycle present.
+        // tuple.1 (Option<Path<N>>): None if no cycle found, Path representing cycle if cycle found.
+        pub fn has_cycle<N>(graph: &Graph<N, f64>) -> (bool, Option<Path<N>>) {
+            // Initialise data structures
+            let mut visited: HashMap<NodeIndex, bool> = HashMap::new();
+            let mut edgeTo: HashMap<NodeIndex, Option<EdgeIndex>> = HashMap::new();
+            let mut onStack: HashMap<NodeIndex, bool> = HashMap::new();
+            let mut cycle: Option<Path<N>> = None;
+
+            for node in graph.node_indices() {
+                visited.insert(node, false);
+                edgeTo.insert(node, None);
+                onStack.insert(node, false);
+            }
+
+            for node in graph.node_indices() {
+                if !visited.get(&node).unwrap() {
+                    _has_cycle_dfs(graph, node, &mut visited, &mut edgeTo, &mut onStack, &mut cycle);
+                }
+            }
+
+            match cycle {
+                None => {(false, None)},
+                Some(discovered_cycle) => {(true, Some(discovered_cycle))}
+            }
+        }
+
+        fn _has_cycle_dfs<N>(
+            graph: &Graph<N, f64>, 
+            node: NodeIndex, 
+            visited: &mut HashMap<NodeIndex, bool>, 
+            edgeTo: &mut HashMap<NodeIndex, Option<EdgeIndex>>, 
+            onStack: &mut HashMap<NodeIndex, bool>,
+            cycle: &mut Option<Path<N>>
+        ) {
+            // logObject("dfs visit node: ", &node);
+            onStack.insert(node, true);
+            visited.insert(node, true);
+
+            for edge in graph.edges_directed(node, Outgoing) {
+                let edgeId = edge.id();
+                let target = edge.target();
+
+                if cycle.is_some() {
+                    return;
+                } else if !visited.get(&target).unwrap() {
+                    edgeTo.insert(target, Some(edgeId));
+                    _has_cycle_dfs(graph, target, visited, edgeTo, onStack, cycle);
+                } else if *onStack.get(&target).unwrap() {
+                    let mut new_cycle: Path<N> = Path::new(target);
+                    let mut edgeStack: Vec<EdgeIndex>= Vec::new();
+
+                    let mut edgeInCycle = edgeId;
+                    edgeStack.push(edgeInCycle);
+                    edgeInCycle = edgeTo.get(&graph.edge_endpoints(edgeInCycle).unwrap().0).unwrap().unwrap();
+
+                    while graph.edge_endpoints(edgeInCycle).unwrap().1 != target {
+                        edgeStack.push(edgeInCycle);
+                        edgeInCycle = edgeTo.get(&graph.edge_endpoints(edgeInCycle).unwrap().0).unwrap().unwrap()
+                    }
+
+                    while !edgeStack.is_empty() {
+                        new_cycle.add_to_path(graph, edgeStack.pop().unwrap());
+                    }
+
+                    *cycle = Some(new_cycle);
+                }
+            }
+
+            onStack.insert(node, false);
+        }
+
+        #[test]
+        fn has_cycle_test_0() {
+            let mut graph: Graph<u32, f64> = Graph::new();
+            let mut nodes: Vec<NodeIndex> = Vec::new();
+            for i in 0..5 {
+                nodes.push(graph.add_node(i));
+            }
+
+            graph.add_edge(nodes[0], nodes[1], 1.0);
+            graph.add_edge(nodes[1], nodes[2], 1.0);
+            graph.add_edge(nodes[2], nodes[3], 1.0);
+            graph.add_edge(nodes[3], nodes[4], 1.0);
+            graph.add_edge(nodes[4], nodes[1], 1.0);
+            graph.add_edge(nodes[2], nodes[4], 1.0);
+
+            let (cycle_found, cycle) = has_cycle(&graph);
+            logObject("cycle0: ", &cycle.unwrap().nodes());
+
+            assert!(cycle_found);
+        }
+
+        // Test has_cycle() on a DAG, should not find a cycle.
+        #[test]
+        fn has_cycle_test_1() {
+            let mut graph: Graph<u32, f64> = Graph::new();
+            let mut nodes: Vec<NodeIndex> = Vec::new();
+            for i in 0..8 {
+                nodes.push(graph.add_node(i));
+            }
+
+            graph.add_edge(nodes[5], nodes[4], 0.35);
+            graph.add_edge(nodes[4], nodes[7], 0.37);
+            graph.add_edge(nodes[5], nodes[7], 0.28);
+            graph.add_edge(nodes[5], nodes[1], 0.32);
+            graph.add_edge(nodes[4], nodes[0], 0.38);
+            graph.add_edge(nodes[0], nodes[2], 0.26);
+            graph.add_edge(nodes[3], nodes[7], 0.39);
+            graph.add_edge(nodes[1], nodes[3], 0.29);
+            graph.add_edge(nodes[7], nodes[2], 0.34);
+            graph.add_edge(nodes[6], nodes[2], 0.40);
+            graph.add_edge(nodes[3], nodes[6], 0.52);
+            graph.add_edge(nodes[6], nodes[0], 0.58);
+            graph.add_edge(nodes[6], nodes[4], 0.93);
+
+            let (cycle_found, _cycle) = has_cycle(&graph);
+            assert!(!cycle_found);
+        }
+
+        #[test]
+        fn has_cycle_test_2() {
+            let mut graph: Graph<u32, f64> = Graph::new();
+            let mut nodes: Vec<NodeIndex> = Vec::new();
+            for i in 0..8 {
+                nodes.push(graph.add_node(i));
+            }
+
+            graph.add_edge(nodes[4], nodes[5], 0.35);
+            graph.add_edge(nodes[5], nodes[4], 0.35);
+            graph.add_edge(nodes[4], nodes[7], 0.37);
+            graph.add_edge(nodes[5], nodes[7], 0.28);
+            graph.add_edge(nodes[7], nodes[5], 0.28);
+            graph.add_edge(nodes[5], nodes[1], 0.32);
+            graph.add_edge(nodes[0], nodes[4], 0.38);
+            graph.add_edge(nodes[0], nodes[2], 0.26);
+            graph.add_edge(nodes[7], nodes[3], 0.39);
+            graph.add_edge(nodes[1], nodes[3], 0.29);
+            graph.add_edge(nodes[2], nodes[7], 0.34);
+
+            graph.add_edge(nodes[6], nodes[2], -1.20);
+            graph.add_edge(nodes[3], nodes[6], 0.52);
+            graph.add_edge(nodes[6], nodes[0], -1.40);
+            graph.add_edge(nodes[6], nodes[4], -1.25);
+
+            let (cycle_found, cycle) = has_cycle(&graph);
+            logObject("cycle2: ", &cycle.unwrap().nodes());
+            assert!(cycle_found);
+        }
+    }
 }
