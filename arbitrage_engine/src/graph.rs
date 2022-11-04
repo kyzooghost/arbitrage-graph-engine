@@ -1,3 +1,5 @@
+// https://github.com/josch/cycles_hawick_james/blob/master/circuits_hawick.d
+
 pub use graph_mod::*;
 
 mod graph_mod {
@@ -130,8 +132,23 @@ mod graph_mod {
     }
 
     pub mod cycle {
-        use super::{Graph, path::Path, NodeIndex, EdgeIndex, Outgoing, EdgeRef, logObject, logText};
-        use std::{collections::HashMap};
+        use petgraph::graph::Node;
+
+        use super::{
+            Graph, 
+            path::Path, 
+            NodeIndex, 
+            EdgeIndex, 
+            Outgoing, 
+            EdgeRef, 
+            logObject, 
+            logText
+        };
+
+        use std::{
+            collections::{HashMap, HashSet}, 
+            hash::Hash
+        };
 
         // DFS algorithm to determine if a cycle exists in a graph, linear time algorithm: O(V + E).
         // Returns tuple
@@ -170,7 +187,6 @@ mod graph_mod {
             onStack: &mut HashMap<NodeIndex, bool>,
             cycle: &mut Option<Path<N>>
         ) {
-            // logObject("dfs visit node: ", &node);
             onStack.insert(node, true);
             visited.insert(node, true);
 
@@ -207,6 +223,144 @@ mod graph_mod {
             onStack.insert(node, false);
         }
 
+        pub fn find_cycles<N>(graph: &Graph<N, f64>) -> Vec<Path<N>> {
+            // Collections of cycles
+            let mut cycles: Vec<Path<N>> = Vec::new();
+            // Node => isBlocked
+            let mut blocked: HashMap<NodeIndex, bool> = HashMap::new();
+            // source_node => edges, represented by vector of destination_nodes
+            let mut edges: HashMap<NodeIndex, Vec<NodeIndex>> = HashMap::new();
+            // source_node => blocked edges, represented by destination node?
+            let mut blocked_edges: HashMap<NodeIndex, HashSet<NodeIndex>> = HashMap::new();
+            // Unsure of what we use this stack for
+            let mut stack: Vec<NodeIndex> = Vec::new();
+            // Set to keep track of which nodes we have call circuit for
+            let mut circuited_nodes: HashSet<NodeIndex> = HashSet::new();
+            // Collection of all nodes we have yet to call circuit on
+            let mut uncircuited_nodes: Vec<NodeIndex> = Vec::new();
+            
+            // Initialize data structures
+            for node in graph.node_indices() {
+                logObject("initialize for source node", &node);
+                blocked.insert(node, false);
+                blocked_edges.insert(node, HashSet::new());
+                uncircuited_nodes.push(node);
+
+                let mut neighbors:Vec<NodeIndex> = Vec::new();
+                for target_node in graph.neighbors(node) {
+                    logObject("   add edge to node", &target_node);
+                    neighbors.push(target_node);
+                }
+                edges.insert(node, neighbors);
+            }
+
+            while !uncircuited_nodes.is_empty() {
+                let start: NodeIndex = uncircuited_nodes.pop().unwrap();
+
+                // Reset all blocked markers for nodes and edges
+                for node in graph.node_indices() {
+                    blocked.insert(node, false);
+                    blocked_edges.get_mut(&node).unwrap().clear();
+                }
+
+                _find_cycles_circuit(start, start, graph, &mut blocked, &mut edges, &mut blocked_edges, &mut cycles, &mut stack, &mut circuited_nodes); 
+                circuited_nodes.insert(start);
+            }
+
+            cycles
+        }
+
+        fn _find_cycles_circuit<N>(
+            // Node we are currently visiting with circuit
+            circuit_node: NodeIndex, 
+            // Node we visited in the first circuit call (should be bottom of stack?)
+            start_node: NodeIndex, 
+            graph: &Graph<N, f64>,
+            blocked: &mut HashMap<NodeIndex, bool>, 
+            edges: &HashMap<NodeIndex, Vec<NodeIndex>>, 
+            blocked_edges: &mut HashMap<NodeIndex, HashSet<NodeIndex>>, 
+            cycles: &mut Vec<Path<N>>,
+            stack: &mut Vec<NodeIndex>,
+            circuited_nodes: &mut HashSet<NodeIndex>
+        ) -> bool {
+            let mut is_circuit_found = false;
+            // Keeping track of what is on the recursion stack.
+            stack.push(circuit_node);
+            // Not only do we keep track on the recursion stack, but also put a temporary 'blocked' marker on it? Not a permanent 'visited' marker.
+            blocked.insert(circuit_node, true);
+            
+            // Iterate through every edge with node == source, 
+            for target_node in edges.get(&circuit_node).unwrap() {
+                // If we have already invoked circuit for this node, skip
+                if circuited_nodes.contains(target_node)  {continue;}
+
+                // We have found a circuit, if we have found our start_node again
+                // TO-DO, can we replace start_node with bottom of the stack?
+                if target_node == &start_node {
+                    // assert!(stack.len() < graph.node_count());
+                    logObject("Cycle found ending at node: ", &stack);
+
+                    let cycle: Path<N> = Path::new(start_node);
+                    for node in stack.iter() {
+
+                        logObject(" .  ", &node);
+                    }
+
+                    is_circuit_found = true;
+                // Else if target_node isn't blocked && recursive call of circuit on target_node returns true
+                // There is only one condition to return true, if circuit has been found
+                } else if !blocked.get(target_node).unwrap() 
+                    && _find_cycles_circuit(*target_node, start_node , graph, blocked, edges, blocked_edges, cycles, stack, circuited_nodes) {
+                        is_circuit_found = true;
+                    }
+            }
+
+            // If we have found a circuit, unblock the node?
+            if is_circuit_found {
+                _find_cycles_unblock::<N>(circuit_node, blocked, blocked_edges);
+            // Iterate through every edge with node == source, again.
+            } else {
+                for target_node in edges.get(&circuit_node).unwrap() {
+                    // Skip if we have already circuited this node.
+                    if circuited_nodes.contains(target_node)  {continue;}
+                    // Hmmm, but this is backwards to edges? It is indexed by target_node?
+                    // But we don't use this blocked_edges collection anywhere? We don't use it in any conditional?
+                    // So any edge leading into the circuited node, needs to be marked as blocked.
+                    if !blocked_edges.get(target_node).unwrap().contains(&circuit_node) {
+                        blocked_edges.get_mut(target_node).unwrap().insert(circuit_node);
+                    }
+                }
+            }
+
+            stack.pop();
+            is_circuit_found
+        }
+
+        fn _find_cycles_unblock<N>(
+            target_node: NodeIndex, 
+            blocked: &mut HashMap<NodeIndex, bool>, 
+            blocked_edges: &mut HashMap<NodeIndex, HashSet<NodeIndex>>
+        ){
+            blocked.insert(target_node, false);
+
+            let mut source_nodes_to_unblock: Vec<NodeIndex> = blocked_edges.get(&target_node).unwrap().iter().cloned().collect();
+
+            while !source_nodes_to_unblock.is_empty() {
+                let source_node = source_nodes_to_unblock.pop().unwrap();
+
+                // Will only call recursive unblock if node is blocked
+                // Cannot call recursive unblock on itself, because we have unblocked it at the start of this function
+                // So we don't need to worry about mutating the same hashset
+                // Should be to move the hashset elements into vector, and clear the hashset (where is the one liner to do that lol)
+                // And the implementation for removeFromList() is an O(N) implementation anyway, making unblock an O(N^2) function if we ignore the recursive part. Provided that converting from hashset to vector is an O(N) operation, we have reduced it to an O(N) operation - copy whole hashset, then iterate through single loop for hashset elements
+                if *blocked.get(&source_node).unwrap() {
+                    _find_cycles_unblock::<N>(source_node, blocked, blocked_edges);
+                }
+            }
+
+            blocked_edges.get_mut(&target_node).unwrap().clear()
+    }
+
         #[test]
         fn has_cycle_test_0() {
             let mut graph: Graph<u32, f64> = Graph::new();
@@ -223,7 +377,6 @@ mod graph_mod {
             graph.add_edge(nodes[2], nodes[4], 1.0);
 
             let (cycle_found, cycle) = has_cycle(&graph);
-            logObject("cycle0: ", &cycle.unwrap().nodes());
 
             assert!(cycle_found);
         }
@@ -281,8 +434,26 @@ mod graph_mod {
             graph.add_edge(nodes[6], nodes[4], -1.25);
 
             let (cycle_found, cycle) = has_cycle(&graph);
-            logObject("cycle2: ", &cycle.unwrap().nodes());
             assert!(cycle_found);
         }
+    
+        #[test]
+        fn find_cycles_test_0() {
+            let mut graph: Graph<u32, f64> = Graph::new();
+            let mut nodes: Vec<NodeIndex> = Vec::new();
+            for i in 0..5 {
+                nodes.push(graph.add_node(i));
+            }
+
+            graph.add_edge(nodes[0], nodes[1], 1.0);
+            graph.add_edge(nodes[1], nodes[2], 1.0);
+            graph.add_edge(nodes[2], nodes[3], 1.0);
+            graph.add_edge(nodes[3], nodes[4], 1.0);
+            graph.add_edge(nodes[4], nodes[1], 1.0);
+            graph.add_edge(nodes[2], nodes[4], 1.0);
+
+            find_cycles(&graph);
+        }
+
     }
 }
