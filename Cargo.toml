@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "adaptors",
     "app",
     "arbitrage_engine"
 ]
