@@ -4,9 +4,9 @@ pub use graph_mod::*;
 
 mod graph_mod {
     use petgraph::{
-        graph::Graph,
+        graph::{Graph, Node, EdgeReference},
         prelude::{EdgeIndex, NodeIndex},
-        visit::EdgeRef,
+        visit::{NodeRef, EdgeRef},
         Direction::Outgoing,
     };
 
@@ -34,14 +34,14 @@ mod graph_mod {
 
         // Choosing to store vector of indexes, rather than using a recursive type as we did in Java. Should be ok if the vectors don't grow too large.
         #[derive(Debug)]
-        pub struct Path<N> {
+        pub struct Path<N: Clone> {
             weight: f64,
             edges: Vec<EdgeIndex>,
             nodes: Vec<NodeIndex>,
             node_type: PhantomData<N>,
         }
 
-        impl<N> Path<N> {
+        impl<N: Clone> Path<N> {
             pub fn new(source_node: NodeIndex) -> Self {
                 Path {
                     weight: 0.0_f64,
@@ -136,22 +136,107 @@ mod graph_mod {
     }
 
     pub mod cycle {
-        use petgraph::graph::Node;
+
+        use petgraph::{visit::IntoNodeIdentifiers, graph::Node};
 
         use super::{
-            logObject, logText, path::Path, EdgeIndex, EdgeRef, Graph, NodeIndex, Outgoing,
+            logObject, 
+            logText, 
+            path::Path, 
+            EdgeIndex, 
+            EdgeRef, 
+            EdgeReference,
+            Graph, 
+            NodeIndex, 
+            NodeRef,
+            Outgoing,
         };
 
         use std::{
-            collections::{HashMap, HashSet},
+            collections::{HashMap, HashSet, VecDeque},
             hash::Hash,
         };
+
+        // Modified queue-based Bellman-Ford algorithm. O(E) practically, O(V * E) theoretically.
+        // https://konaeakira.github.io/posts/using-the-shortest-path-faster-algorithm-to-find-negative-cycles.html
+        fn get_negative_cycle_for_source_quick<N: Clone>(graph: &Graph<N, f64>, source: NodeIndex) -> (bool, Option<Path<N>>) {
+            // Node => Weight of current shortest path from source.
+            let mut dist: HashMap<NodeIndex, f64> = HashMap::new();
+            // Node => Edge in current shortest path with node as target_node.
+            let mut edgeTo: HashMap<NodeIndex, Option<EdgeReference<f64>>> = HashMap::new();
+            let mut queue: VecDeque<NodeIndex> = VecDeque::new();
+            let mut on_queue: HashMap<NodeIndex, bool>= HashMap::new();
+            // Counter of relax operations
+            let mut counter = 0;
+
+            for node in graph.node_indices() {
+                edgeTo.insert(node, None);
+                dist.insert(node, f64::MAX);
+                on_queue.insert(node, false);
+            }
+
+            queue.push_back(source);
+            on_queue.insert(source, true);
+            dist.insert(source, 0.0);
+
+            while !queue.is_empty() {
+                let current_node = queue.pop_front().unwrap();
+                on_queue.insert(source, false);
+
+                // Iterate through all neighbours
+                for edge in graph.edges_directed(current_node, Outgoing) {
+                    let weight = edge.weight();
+                    let target_node = edge.target();
+
+                    // Relax operation
+                    if *dist.get(&target_node).unwrap() > dist.get(&current_node).unwrap() + weight {
+                        *dist.get_mut(&target_node).unwrap() = dist.get(&current_node).unwrap() + weight;
+                        *edgeTo.get_mut(&target_node).unwrap() = Some(edge);
+                        counter += 1;
+
+                        if !on_queue.get(&target_node).unwrap() {
+                            queue.push_back(target_node);
+                            on_queue.insert(target_node, true);
+                        }
+
+                        // Check for cycle every V times we call relax.
+                        if counter % graph.node_count() == 0 {
+                            // Construct current SPT from edgeTo collection
+                            let mut spt: Graph<N, f64> = Graph::new();
+
+                            // Zzz need to implement N: Clone trait just for this one line
+                            // I guess the issue is that `graph` owns N, but to make another graph with the same nodes we need to `copy` the nodes over. So we need to tell the comiler that N is a type that can be safely deep cloned.
+                            for node in graph.node_indices() {
+                                spt.add_node(graph.node_weight(node).unwrap().clone());
+                            }
+
+                            for node in graph.node_indices() {
+                                if let Some(spt_edge) = edgeTo.get(&node).unwrap() {
+                                    let spt_edge_weight = spt_edge.weight();
+                                    let spt_edge_source = spt_edge.source();
+                                    spt.add_edge(spt_edge_source, node, *spt_edge_weight);
+                                }
+                            }
+
+                            let (cycle_found, spt_cycle) = has_cycle(&spt);
+                            
+                            if cycle_found { 
+                                return (cycle_found, spt_cycle); 
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Emptied queue without finding cycle
+            (false, None)
+        }
 
         // DFS algorithm to determine if a cycle exists in a graph, linear time algorithm: O(V + E).
         // Returns tuple
         // tuple.0 (bool): false if no cycle found, true if cycle present.
         // tuple.1 (Option<Path<N>>): None if no cycle found, Path representing cycle if cycle found.
-        pub fn has_cycle<N>(graph: &Graph<N, f64>) -> (bool, Option<Path<N>>) {
+        fn has_cycle<N: Clone>(graph: &Graph<N, f64>) -> (bool, Option<Path<N>>) {
             // Initialise data structures
             let mut visited: HashMap<NodeIndex, bool> = HashMap::new();
             let mut edgeTo: HashMap<NodeIndex, Option<EdgeIndex>> = HashMap::new();
@@ -183,7 +268,7 @@ mod graph_mod {
             }
         }
 
-        fn _has_cycle_dfs<N>(
+        fn _has_cycle_dfs<N: Clone>(
             graph: &Graph<N, f64>,
             node: NodeIndex,
             visited: &mut HashMap<NodeIndex, bool>,
@@ -203,23 +288,24 @@ mod graph_mod {
                 } else if !visited.get(&target).unwrap() {
                     edgeTo.insert(target, Some(edgeId));
                     _has_cycle_dfs(graph, target, visited, edgeTo, onStack, cycle);
+                // If target node is on stack, we have found a cycle
                 } else if *onStack.get(&target).unwrap() {
+                    // We have an issue that edgeTo gives EdgeIndex type, whereas we need type N for Path
+                    // Also Path needs to start from the first node, whereas we can only get our cycles backwards by unpopping the stack.
                     let mut new_cycle: Path<N> = Path::new(target);
-                    let mut edgeStack: Vec<EdgeIndex> = Vec::new();
+                    let mut edgeStack: Vec<EdgeIndex> = vec![edgeId];
 
-                    let mut edgeInCycle = edgeId;
-                    edgeStack.push(edgeInCycle);
-                    edgeInCycle = edgeTo
-                        .get(&graph.edge_endpoints(edgeInCycle).unwrap().0)
-                        .unwrap()
-                        .unwrap();
+                    // Fill edgeStack with cycle edges, going backwards                    
+                    loop {
+                        let most_recent_edge = &graph.edge_endpoints(*edgeStack.last().unwrap()).unwrap();
+                        let most_recent_edge_from = most_recent_edge.0;
 
-                    while graph.edge_endpoints(edgeInCycle).unwrap().1 != target {
-                        edgeStack.push(edgeInCycle);
-                        edgeInCycle = edgeTo
-                            .get(&graph.edge_endpoints(edgeInCycle).unwrap().0)
-                            .unwrap()
-                            .unwrap()
+                        if most_recent_edge_from == target {
+                            break;
+                        }
+
+                        let previous_edge = edgeTo.get(&most_recent_edge_from).unwrap().unwrap();
+                        edgeStack.push(previous_edge);
                     }
 
                     while !edgeStack.is_empty() {
@@ -233,7 +319,10 @@ mod graph_mod {
             onStack.insert(node, false);
         }
 
-        pub fn find_cycles<N>(graph: &Graph<N, f64>) -> Vec<Path<N>> {
+        // Intuitively this is O((E + V) * C), since it's a DFS-style approach and it 'unwinds' whenever a cycle is found.
+        // In our application, our initial graph will be a complete graph hence we will waste a lot of 'C's on noise.
+        // So we hope to filter our graph down using modified Bellman-Ford prior to using this function.
+        fn find_cycles<N: Clone>(graph: &Graph<N, f64>) -> Vec<Path<N>> {
             // Collections of cycles
             let mut cycles: Vec<Path<N>> = Vec::new();
             // Node => isBlocked
@@ -288,7 +377,7 @@ mod graph_mod {
             cycles
         }
 
-        fn _find_cycles_circuit<N>(
+        fn _find_cycles_circuit<N: Clone>(
             // Node we are currently visiting with circuit
             circuit_node: NodeIndex,
             // Node we visited in the first circuit call (should be bottom of stack?)
@@ -426,7 +515,6 @@ mod graph_mod {
             graph.add_edge(nodes[2], nodes[4], 1.0);
 
             let (cycle_found, cycle) = has_cycle(&graph);
-
             assert!(cycle_found);
         }
 
@@ -530,9 +618,8 @@ mod graph_mod {
             graph.add_edge(nodes[6], nodes[4], 0.93);
 
             let cycles = find_cycles(&graph);
-            assert!(cycles.len() == 0);
+            assert!(cycles.is_empty());
         }
-
 
         #[test]
         fn find_cycles_test_2() {
@@ -562,5 +649,83 @@ mod graph_mod {
             let cycles = find_cycles(&graph);
             assert!(cycles.len() == 15);
         }
+
+        #[test]
+        fn get_negative_cycle_for_source_quick_test_0() {
+            let mut graph: Graph<u32, f64> = Graph::new();
+            let mut nodes: Vec<NodeIndex> = Vec::new();
+            for i in 0..5 {
+                nodes.push(graph.add_node(i));
+            }
+
+            graph.add_edge(nodes[0], nodes[1], 1.0);
+            graph.add_edge(nodes[1], nodes[2], 1.0);
+            graph.add_edge(nodes[2], nodes[3], 1.0);
+            graph.add_edge(nodes[3], nodes[4], 1.0);
+            graph.add_edge(nodes[4], nodes[1], 1.0);
+            graph.add_edge(nodes[2], nodes[4], 1.0);
+
+            let (negative_cycle_found, cycle) = get_negative_cycle_for_source_quick(&graph, nodes[0]);
+            assert!(!negative_cycle_found);
+            assert!(cycle.is_none());
+        }
+
+        // Test has_cycle() on a DAG, should not find a cycle.
+        #[test]
+        fn get_negative_cycle_for_source_quick_test_1() {
+            let mut graph: Graph<u32, f64> = Graph::new();
+            let mut nodes: Vec<NodeIndex> = Vec::new();
+            for i in 0..8 {
+                nodes.push(graph.add_node(i));
+            }
+
+            graph.add_edge(nodes[5], nodes[4], 0.35);
+            graph.add_edge(nodes[4], nodes[7], 0.37);
+            graph.add_edge(nodes[5], nodes[7], 0.28);
+            graph.add_edge(nodes[5], nodes[1], 0.32);
+            graph.add_edge(nodes[4], nodes[0], 0.38);
+            graph.add_edge(nodes[0], nodes[2], 0.26);
+            graph.add_edge(nodes[3], nodes[7], 0.39);
+            graph.add_edge(nodes[1], nodes[3], 0.29);
+            graph.add_edge(nodes[7], nodes[2], 0.34);
+            graph.add_edge(nodes[6], nodes[2], 0.40);
+            graph.add_edge(nodes[3], nodes[6], 0.52);
+            graph.add_edge(nodes[6], nodes[0], 0.58);
+            graph.add_edge(nodes[6], nodes[4], 0.93);
+
+            let (negative_cycle_found, cycle) = get_negative_cycle_for_source_quick(&graph, nodes[0]);
+            assert!(!negative_cycle_found);
+            assert!(cycle.is_none());
+        }
+
+        #[test]
+        fn get_negative_cycle_for_source_quick_test_2() {
+            let mut graph: Graph<u32, f64> = Graph::new();
+            let mut nodes: Vec<NodeIndex> = Vec::new();
+            for i in 0..8 {
+                nodes.push(graph.add_node(i));
+            }
+
+            graph.add_edge(nodes[4], nodes[5], 0.35);
+            graph.add_edge(nodes[5], nodes[4], -0.66);
+            graph.add_edge(nodes[4], nodes[7], 0.37);
+            graph.add_edge(nodes[5], nodes[7], 0.28);
+            graph.add_edge(nodes[7], nodes[5], 0.28);
+            graph.add_edge(nodes[5], nodes[1], 0.32);
+            graph.add_edge(nodes[0], nodes[4], 0.38);
+            graph.add_edge(nodes[0], nodes[2], 0.26);
+            graph.add_edge(nodes[7], nodes[3], 0.39);
+            graph.add_edge(nodes[1], nodes[3], 0.29);
+            graph.add_edge(nodes[2], nodes[7], 0.34);
+            graph.add_edge(nodes[6], nodes[2], 0.40);
+            graph.add_edge(nodes[3], nodes[6], 0.52);
+            graph.add_edge(nodes[6], nodes[0], 0.58);
+            graph.add_edge(nodes[6], nodes[4], 0.93);
+
+            let (negative_cycle_found, cycle) = get_negative_cycle_for_source_quick(&graph, nodes[0]);
+            assert!(negative_cycle_found);
+            assert!(cycle.unwrap().nodes().len() == 3)
+        }
+
     }
 }
