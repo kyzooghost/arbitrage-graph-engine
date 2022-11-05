@@ -30,7 +30,10 @@ mod graph_mod {
 
     pub mod path {
         use super::{EdgeIndex, Graph, NodeIndex};
-        use std::marker::PhantomData;
+        use std::{
+            marker::PhantomData,
+            cmp::Ordering
+        };
 
         // Choosing to store vector of indexes, rather than using a recursive type as we did in Java. Should be ok if the vectors don't grow too large.
         #[derive(Debug)]
@@ -84,6 +87,32 @@ mod graph_mod {
 
             pub fn length(&self) -> usize {
                 self.nodes.len()
+            }
+        }
+
+        impl<N: Clone> PartialEq for Path<N> {
+            fn eq(&self, other: &Self) -> bool {
+                self.weight.to_bits() == other.weight.to_bits()
+            }
+        }
+
+        impl<N: Clone> Eq for Path<N> {}
+
+        impl<N: Clone> PartialOrd for Path<N> {
+            fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+                Some(self.cmp(other))
+            }
+        }
+
+        impl<N: Clone> Ord for Path<N> {
+            fn cmp(&self, other: &Self) -> Ordering {
+                if self.weight < other.weight {
+                    Ordering::Less
+                } else if self.weight > other.weight {
+                    Ordering::Greater
+                } else {
+                    Ordering::Equal
+                }
             }
         }
 
@@ -157,8 +186,16 @@ mod graph_mod {
             hash::Hash,
         };
 
+        // Method 1 for obtaining all negative cycles, sorted from most negative to least.
+        fn get_all_negative_cycles_0<N: Clone>(graph: &Graph<N, f64>) -> Vec<Path<N>> {
+            let paths = find_cycles(graph);
+            let mut negative_paths: Vec<Path<N>> = paths.into_iter().filter(|path| path.weight() < 0.0).collect();
+            negative_paths.sort_unstable();
+            negative_paths
+        }
+
         // Attempts get_negative_cycle_for_source_quick for all nodes, stops if it finds a negative cycle
-        fn get_negative_cycle_quick<N: Clone>(graph: &Graph<N, f64>) -> (bool, Option<Path<N>>) {
+        pub fn get_negative_cycle_quick<N: Clone>(graph: &Graph<N, f64>) -> (bool, Option<Path<N>>) {
             for node in graph.node_indices() {
                 let (negative_cycle_found, cycle) = get_negative_cycle_for_source_quick(graph, node);
                 if negative_cycle_found {
@@ -427,6 +464,10 @@ mod graph_mod {
                             cycle.add_to_path(graph, edge);
                         }
                     }
+
+                    // Cycle contains all nodes in the cycle, but is missing an edge.
+                    let final_edge = graph.find_edge(*cycle.nodes().last().unwrap(), *cycle.nodes().first().unwrap()).unwrap();
+                    cycle.add_to_path(graph, final_edge);
 
                     cycles.push(cycle);
 
@@ -742,8 +783,88 @@ mod graph_mod {
 
             let (negative_cycle_found, cycle) = get_negative_cycle_for_source_quick(&graph, nodes[0]);
             assert!(negative_cycle_found);
-            assert!(cycle.unwrap().nodes().len() == 3)
+            assert!(cycle.unwrap().nodes().len() == 3);
+            let (negative_cycle_found, cycle) = get_negative_cycle_quick(&graph);
+            assert!(negative_cycle_found);
+            assert!(cycle.unwrap().nodes().len() == 3);
         }
 
+        #[test]
+        fn get_all_negative_cycles_test_0() {
+            let mut graph: Graph<u32, f64> = Graph::new();
+            let mut nodes: Vec<NodeIndex> = Vec::new();
+            for i in 0..5 {
+                nodes.push(graph.add_node(i));
+            }
+
+            graph.add_edge(nodes[0], nodes[1], 1.0);
+            graph.add_edge(nodes[1], nodes[2], 1.0);
+            graph.add_edge(nodes[2], nodes[3], 1.0);
+            graph.add_edge(nodes[3], nodes[4], 1.0);
+            graph.add_edge(nodes[4], nodes[1], 1.0);
+            graph.add_edge(nodes[2], nodes[4], 1.0);
+
+            let cycles = get_all_negative_cycles_0(&graph);
+            assert!(cycles.is_empty());
+
+            // let (negative_cycle_found, cycle) = get_negative_cycle_quick(&graph);
+            // assert!(!negative_cycle_found);
+            // assert!(cycle.is_none());
+        }
+
+        // Test has_cycle() on a DAG, should not find a cycle.
+        #[test]
+        fn get_all_negative_cycles_test_1() {
+            let mut graph: Graph<u32, f64> = Graph::new();
+            let mut nodes: Vec<NodeIndex> = Vec::new();
+            for i in 0..8 {
+                nodes.push(graph.add_node(i));
+            }
+
+            graph.add_edge(nodes[5], nodes[4], 0.35);
+            graph.add_edge(nodes[4], nodes[7], 0.37);
+            graph.add_edge(nodes[5], nodes[7], 0.28);
+            graph.add_edge(nodes[5], nodes[1], 0.32);
+            graph.add_edge(nodes[4], nodes[0], 0.38);
+            graph.add_edge(nodes[0], nodes[2], 0.26);
+            graph.add_edge(nodes[3], nodes[7], 0.39);
+            graph.add_edge(nodes[1], nodes[3], 0.29);
+            graph.add_edge(nodes[7], nodes[2], 0.34);
+            graph.add_edge(nodes[6], nodes[2], 0.40);
+            graph.add_edge(nodes[3], nodes[6], 0.52);
+            graph.add_edge(nodes[6], nodes[0], 0.58);
+            graph.add_edge(nodes[6], nodes[4], 0.93);
+
+            let cycles = get_all_negative_cycles_0(&graph);
+            assert!(cycles.is_empty());
+        }
+
+        #[test]
+        fn get_all_negative_cycles_test_2() {
+            let mut graph: Graph<u32, f64> = Graph::new();
+            let mut nodes: Vec<NodeIndex> = Vec::new();
+            for i in 0..8 {
+                nodes.push(graph.add_node(i));
+            }
+
+            graph.add_edge(nodes[4], nodes[5], 0.35);
+            graph.add_edge(nodes[5], nodes[4], -0.66);
+            graph.add_edge(nodes[4], nodes[7], 0.37);
+            graph.add_edge(nodes[5], nodes[7], 0.28);
+            graph.add_edge(nodes[7], nodes[5], 0.28);
+            graph.add_edge(nodes[5], nodes[1], 0.32);
+            graph.add_edge(nodes[0], nodes[4], 0.38);
+            graph.add_edge(nodes[0], nodes[2], 0.26);
+            graph.add_edge(nodes[7], nodes[3], 0.39);
+            graph.add_edge(nodes[1], nodes[3], 0.29);
+            graph.add_edge(nodes[2], nodes[7], 0.34);
+            graph.add_edge(nodes[6], nodes[2], 0.40);
+            graph.add_edge(nodes[3], nodes[6], 0.52);
+            graph.add_edge(nodes[6], nodes[0], 0.58);
+            graph.add_edge(nodes[6], nodes[4], 0.93);
+
+            let cycles = get_all_negative_cycles_0(&graph);
+            assert!(cycles.len() == 2);
+        }
     }
 }
