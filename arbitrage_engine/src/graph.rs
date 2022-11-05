@@ -5,9 +5,9 @@ pub use graph_mod::*;
 mod graph_mod {
     use petgraph::{
         graph::Graph,
-        prelude::{NodeIndex, EdgeIndex},
+        prelude::{EdgeIndex, NodeIndex},
+        visit::EdgeRef,
         Direction::Outgoing,
-        visit::EdgeRef
     };
 
     use super::super::utils::logger::{logObject, logText};
@@ -29,7 +29,7 @@ mod graph_mod {
     }
 
     pub mod path {
-        use super::{Graph, NodeIndex, EdgeIndex};
+        use super::{EdgeIndex, Graph, NodeIndex};
         use std::marker::PhantomData;
 
         // Choosing to store vector of indexes, rather than using a recursive type as we did in Java. Should be ok if the vectors don't grow too large.
@@ -38,7 +38,7 @@ mod graph_mod {
             weight: f64,
             edges: Vec<EdgeIndex>,
             nodes: Vec<NodeIndex>,
-            node_type: PhantomData<N>
+            node_type: PhantomData<N>,
         }
 
         impl<N> Path<N> {
@@ -47,12 +47,16 @@ mod graph_mod {
                     weight: 0.0_f64,
                     edges: Vec::new(),
                     nodes: vec![source_node],
-                    node_type: PhantomData
+                    node_type: PhantomData,
                 }
             }
 
             pub fn add_to_path(&mut self, graph: &Graph<N, f64>, edge: EdgeIndex) {
-                assert_eq!(&graph.edge_endpoints(edge).unwrap().0, self.nodes.last().unwrap(), "Edge does not extend from existing path");
+                assert_eq!(
+                    &graph.edge_endpoints(edge).unwrap().0,
+                    self.nodes.last().unwrap(),
+                    "Edge does not extend from existing path"
+                );
                 self.weight += graph.edge_weight(edge).unwrap();
                 self.edges.push(edge);
                 self.nodes.push(graph.edge_endpoints(edge).unwrap().1);
@@ -63,7 +67,7 @@ mod graph_mod {
             }
 
             pub fn edges(&self) -> Vec<EdgeIndex> {
-                let mut vec:Vec<EdgeIndex> = Vec::new();
+                let mut vec: Vec<EdgeIndex> = Vec::new();
                 for edge in self.edges.iter() {
                     vec.push(*edge);
                 }
@@ -71,7 +75,7 @@ mod graph_mod {
             }
 
             pub fn nodes(&self) -> Vec<NodeIndex> {
-                let mut vec:Vec<NodeIndex> = Vec::new();
+                let mut vec: Vec<NodeIndex> = Vec::new();
                 for node in self.nodes.iter() {
                     vec.push(*node);
                 }
@@ -135,19 +139,12 @@ mod graph_mod {
         use petgraph::graph::Node;
 
         use super::{
-            Graph, 
-            path::Path, 
-            NodeIndex, 
-            EdgeIndex, 
-            Outgoing, 
-            EdgeRef, 
-            logObject, 
-            logText
+            logObject, logText, path::Path, EdgeIndex, EdgeRef, Graph, NodeIndex, Outgoing,
         };
 
         use std::{
-            collections::{HashMap, HashSet}, 
-            hash::Hash
+            collections::{HashMap, HashSet},
+            hash::Hash,
         };
 
         // DFS algorithm to determine if a cycle exists in a graph, linear time algorithm: O(V + E).
@@ -169,23 +166,30 @@ mod graph_mod {
 
             for node in graph.node_indices() {
                 if !visited.get(&node).unwrap() {
-                    _has_cycle_dfs(graph, node, &mut visited, &mut edgeTo, &mut onStack, &mut cycle);
+                    _has_cycle_dfs(
+                        graph,
+                        node,
+                        &mut visited,
+                        &mut edgeTo,
+                        &mut onStack,
+                        &mut cycle,
+                    );
                 }
             }
 
             match cycle {
-                None => {(false, None)},
-                Some(discovered_cycle) => {(true, Some(discovered_cycle))}
+                None => (false, None),
+                Some(discovered_cycle) => (true, Some(discovered_cycle)),
             }
         }
 
         fn _has_cycle_dfs<N>(
-            graph: &Graph<N, f64>, 
-            node: NodeIndex, 
-            visited: &mut HashMap<NodeIndex, bool>, 
-            edgeTo: &mut HashMap<NodeIndex, Option<EdgeIndex>>, 
+            graph: &Graph<N, f64>,
+            node: NodeIndex,
+            visited: &mut HashMap<NodeIndex, bool>,
+            edgeTo: &mut HashMap<NodeIndex, Option<EdgeIndex>>,
             onStack: &mut HashMap<NodeIndex, bool>,
-            cycle: &mut Option<Path<N>>
+            cycle: &mut Option<Path<N>>,
         ) {
             onStack.insert(node, true);
             visited.insert(node, true);
@@ -201,15 +205,21 @@ mod graph_mod {
                     _has_cycle_dfs(graph, target, visited, edgeTo, onStack, cycle);
                 } else if *onStack.get(&target).unwrap() {
                     let mut new_cycle: Path<N> = Path::new(target);
-                    let mut edgeStack: Vec<EdgeIndex>= Vec::new();
+                    let mut edgeStack: Vec<EdgeIndex> = Vec::new();
 
                     let mut edgeInCycle = edgeId;
                     edgeStack.push(edgeInCycle);
-                    edgeInCycle = edgeTo.get(&graph.edge_endpoints(edgeInCycle).unwrap().0).unwrap().unwrap();
+                    edgeInCycle = edgeTo
+                        .get(&graph.edge_endpoints(edgeInCycle).unwrap().0)
+                        .unwrap()
+                        .unwrap();
 
                     while graph.edge_endpoints(edgeInCycle).unwrap().1 != target {
                         edgeStack.push(edgeInCycle);
-                        edgeInCycle = edgeTo.get(&graph.edge_endpoints(edgeInCycle).unwrap().0).unwrap().unwrap()
+                        edgeInCycle = edgeTo
+                            .get(&graph.edge_endpoints(edgeInCycle).unwrap().0)
+                            .unwrap()
+                            .unwrap()
                     }
 
                     while !edgeStack.is_empty() {
@@ -238,17 +248,15 @@ mod graph_mod {
             let mut circuited_nodes: HashSet<NodeIndex> = HashSet::new();
             // Collection of all nodes we have yet to call circuit on
             let mut uncircuited_nodes: Vec<NodeIndex> = Vec::new();
-            
+
             // Initialize data structures
             for node in graph.node_indices() {
-                logObject("initialize for source node", &node);
                 blocked.insert(node, false);
                 blocked_edges.insert(node, HashSet::new());
                 uncircuited_nodes.push(node);
 
-                let mut neighbors:Vec<NodeIndex> = Vec::new();
+                let mut neighbors: Vec<NodeIndex> = Vec::new();
                 for target_node in graph.neighbors(node) {
-                    logObject("   add edge to node", &target_node);
                     neighbors.push(target_node);
                 }
                 edges.insert(node, neighbors);
@@ -263,7 +271,17 @@ mod graph_mod {
                     blocked_edges.get_mut(&node).unwrap().clear();
                 }
 
-                _find_cycles_circuit(start, start, graph, &mut blocked, &mut edges, &mut blocked_edges, &mut cycles, &mut stack, &mut circuited_nodes); 
+                _find_cycles_circuit(
+                    start,
+                    start,
+                    graph,
+                    &mut blocked,
+                    &mut edges,
+                    &mut blocked_edges,
+                    &mut cycles,
+                    &mut stack,
+                    &mut circuited_nodes,
+                );
                 circuited_nodes.insert(start);
             }
 
@@ -272,47 +290,64 @@ mod graph_mod {
 
         fn _find_cycles_circuit<N>(
             // Node we are currently visiting with circuit
-            circuit_node: NodeIndex, 
+            circuit_node: NodeIndex,
             // Node we visited in the first circuit call (should be bottom of stack?)
-            start_node: NodeIndex, 
+            start_node: NodeIndex,
             graph: &Graph<N, f64>,
-            blocked: &mut HashMap<NodeIndex, bool>, 
-            edges: &HashMap<NodeIndex, Vec<NodeIndex>>, 
-            blocked_edges: &mut HashMap<NodeIndex, HashSet<NodeIndex>>, 
+            blocked: &mut HashMap<NodeIndex, bool>,
+            edges: &HashMap<NodeIndex, Vec<NodeIndex>>,
+            blocked_edges: &mut HashMap<NodeIndex, HashSet<NodeIndex>>,
             cycles: &mut Vec<Path<N>>,
             stack: &mut Vec<NodeIndex>,
-            circuited_nodes: &mut HashSet<NodeIndex>
+            circuited_nodes: &mut HashSet<NodeIndex>,
         ) -> bool {
             let mut is_circuit_found = false;
             // Keeping track of what is on the recursion stack.
             stack.push(circuit_node);
             // Not only do we keep track on the recursion stack, but also put a temporary 'blocked' marker on it? Not a permanent 'visited' marker.
             blocked.insert(circuit_node, true);
-            
-            // Iterate through every edge with node == source, 
+
+            // Iterate through every edge with node == source,
             for target_node in edges.get(&circuit_node).unwrap() {
                 // If we have already invoked circuit for this node, skip
-                if circuited_nodes.contains(target_node)  {continue;}
+                if circuited_nodes.contains(target_node) {
+                    continue;
+                }
 
                 // We have found a circuit, if we have found our start_node again
                 // TO-DO, can we replace start_node with bottom of the stack?
                 if target_node == &start_node {
-                    // assert!(stack.len() < graph.node_count());
-                    logObject("Cycle found ending at node: ", &stack);
-
-                    let cycle: Path<N> = Path::new(start_node);
-                    for node in stack.iter() {
-
-                        logObject(" .  ", &node);
+                    let mut cycle: Path<N> = Path::new(start_node);
+                    for cycle_node in stack.iter() {
+                        if cycle_node != &start_node {
+                            // Two issues here - 1.) Could have O(1) time here if we refactored, but it's O(e') where e' is edges connected to a instead
+                            let edge = graph
+                                .find_edge(*cycle.nodes().last().unwrap(), *cycle_node)
+                                .unwrap();
+                            cycle.add_to_path(graph, edge);
+                        }
                     }
+
+                    cycles.push(cycle);
 
                     is_circuit_found = true;
                 // Else if target_node isn't blocked && recursive call of circuit on target_node returns true
                 // There is only one condition to return true, if circuit has been found
-                } else if !blocked.get(target_node).unwrap() 
-                    && _find_cycles_circuit(*target_node, start_node , graph, blocked, edges, blocked_edges, cycles, stack, circuited_nodes) {
-                        is_circuit_found = true;
-                    }
+                } else if !blocked.get(target_node).unwrap()
+                    && _find_cycles_circuit(
+                        *target_node,
+                        start_node,
+                        graph,
+                        blocked,
+                        edges,
+                        blocked_edges,
+                        cycles,
+                        stack,
+                        circuited_nodes,
+                    )
+                {
+                    is_circuit_found = true;
+                }
             }
 
             // If we have found a circuit, unblock the node?
@@ -322,12 +357,21 @@ mod graph_mod {
             } else {
                 for target_node in edges.get(&circuit_node).unwrap() {
                     // Skip if we have already circuited this node.
-                    if circuited_nodes.contains(target_node)  {continue;}
+                    if circuited_nodes.contains(target_node) {
+                        continue;
+                    }
                     // Hmmm, but this is backwards to edges? It is indexed by target_node?
                     // But we don't use this blocked_edges collection anywhere? We don't use it in any conditional?
                     // So any edge leading into the circuited node, needs to be marked as blocked.
-                    if !blocked_edges.get(target_node).unwrap().contains(&circuit_node) {
-                        blocked_edges.get_mut(target_node).unwrap().insert(circuit_node);
+                    if !blocked_edges
+                        .get(target_node)
+                        .unwrap()
+                        .contains(&circuit_node)
+                    {
+                        blocked_edges
+                            .get_mut(target_node)
+                            .unwrap()
+                            .insert(circuit_node);
                     }
                 }
             }
@@ -337,13 +381,18 @@ mod graph_mod {
         }
 
         fn _find_cycles_unblock<N>(
-            target_node: NodeIndex, 
-            blocked: &mut HashMap<NodeIndex, bool>, 
-            blocked_edges: &mut HashMap<NodeIndex, HashSet<NodeIndex>>
-        ){
+            target_node: NodeIndex,
+            blocked: &mut HashMap<NodeIndex, bool>,
+            blocked_edges: &mut HashMap<NodeIndex, HashSet<NodeIndex>>,
+        ) {
             blocked.insert(target_node, false);
 
-            let mut source_nodes_to_unblock: Vec<NodeIndex> = blocked_edges.get(&target_node).unwrap().iter().cloned().collect();
+            let mut source_nodes_to_unblock: Vec<NodeIndex> = blocked_edges
+                .get(&target_node)
+                .unwrap()
+                .iter()
+                .cloned()
+                .collect();
 
             while !source_nodes_to_unblock.is_empty() {
                 let source_node = source_nodes_to_unblock.pop().unwrap();
@@ -359,7 +408,7 @@ mod graph_mod {
             }
 
             blocked_edges.get_mut(&target_node).unwrap().clear()
-    }
+        }
 
         #[test]
         fn has_cycle_test_0() {
@@ -436,7 +485,7 @@ mod graph_mod {
             let (cycle_found, cycle) = has_cycle(&graph);
             assert!(cycle_found);
         }
-    
+
         #[test]
         fn find_cycles_test_0() {
             let mut graph: Graph<u32, f64> = Graph::new();
@@ -452,8 +501,66 @@ mod graph_mod {
             graph.add_edge(nodes[4], nodes[1], 1.0);
             graph.add_edge(nodes[2], nodes[4], 1.0);
 
-            find_cycles(&graph);
+            let cycles = find_cycles(&graph);
+            assert!(cycles.len() == 2);
         }
 
+
+        // Test has_cycle() on a DAG, should not find a cycle.
+        #[test]
+        fn find_cycles_test_1() {
+            let mut graph: Graph<u32, f64> = Graph::new();
+            let mut nodes: Vec<NodeIndex> = Vec::new();
+            for i in 0..8 {
+                nodes.push(graph.add_node(i));
+            }
+
+            graph.add_edge(nodes[5], nodes[4], 0.35);
+            graph.add_edge(nodes[4], nodes[7], 0.37);
+            graph.add_edge(nodes[5], nodes[7], 0.28);
+            graph.add_edge(nodes[5], nodes[1], 0.32);
+            graph.add_edge(nodes[4], nodes[0], 0.38);
+            graph.add_edge(nodes[0], nodes[2], 0.26);
+            graph.add_edge(nodes[3], nodes[7], 0.39);
+            graph.add_edge(nodes[1], nodes[3], 0.29);
+            graph.add_edge(nodes[7], nodes[2], 0.34);
+            graph.add_edge(nodes[6], nodes[2], 0.40);
+            graph.add_edge(nodes[3], nodes[6], 0.52);
+            graph.add_edge(nodes[6], nodes[0], 0.58);
+            graph.add_edge(nodes[6], nodes[4], 0.93);
+
+            let cycles = find_cycles(&graph);
+            assert!(cycles.len() == 0);
+        }
+
+
+        #[test]
+        fn find_cycles_test_2() {
+            let mut graph: Graph<u32, f64> = Graph::new();
+            let mut nodes: Vec<NodeIndex> = Vec::new();
+            for i in 0..8 {
+                nodes.push(graph.add_node(i));
+            }
+
+            graph.add_edge(nodes[4], nodes[5], 0.35);
+            graph.add_edge(nodes[5], nodes[4], 0.35);
+            graph.add_edge(nodes[4], nodes[7], 0.37);
+            graph.add_edge(nodes[5], nodes[7], 0.28);
+            graph.add_edge(nodes[7], nodes[5], 0.28);
+            graph.add_edge(nodes[5], nodes[1], 0.32);
+            graph.add_edge(nodes[0], nodes[4], 0.38);
+            graph.add_edge(nodes[0], nodes[2], 0.26);
+            graph.add_edge(nodes[7], nodes[3], 0.39);
+            graph.add_edge(nodes[1], nodes[3], 0.29);
+            graph.add_edge(nodes[2], nodes[7], 0.34);
+
+            graph.add_edge(nodes[6], nodes[2], -1.20);
+            graph.add_edge(nodes[3], nodes[6], 0.52);
+            graph.add_edge(nodes[6], nodes[0], -1.40);
+            graph.add_edge(nodes[6], nodes[4], -1.25);
+
+            let cycles = find_cycles(&graph);
+            assert!(cycles.len() == 15);
+        }
     }
 }
