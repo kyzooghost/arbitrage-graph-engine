@@ -1,12 +1,10 @@
-// https://github.com/josch/cycles_hawick_james/blob/master/circuits_hawick.d
-
 pub use graph_mod::*;
 
 mod graph_mod {
     use petgraph::{
-        graph::{Graph, Node, EdgeReference},
+        graph::{Graph, EdgeReference},
         prelude::{EdgeIndex, NodeIndex},
-        visit::{NodeRef, EdgeRef},
+        visit::{EdgeRef},
         Direction::Outgoing,
     };
 
@@ -165,9 +163,6 @@ mod graph_mod {
     }
 
     pub mod cycle {
-
-        use petgraph::{visit::IntoNodeIdentifiers, graph::Node};
-
         use super::{
             logObject, 
             logText, 
@@ -177,17 +172,30 @@ mod graph_mod {
             EdgeReference,
             Graph, 
             NodeIndex, 
-            NodeRef,
             Outgoing,
         };
 
         use std::{
             collections::{HashMap, HashSet, VecDeque},
-            hash::Hash,
         };
 
+        // Method 2 for obtaining all negative cycles, sorted from most negative to least.
+        // Uses find_cycles within Bellman_Ford, cycles_found() occurs on graphs with less noise, however already O(V) factor for outer loop in function body and duplicate work from encountering the same path.
+        pub fn get_all_negative_cycles_1<N: Clone>(graph: &Graph<N, f64>) -> Vec<Path<N>> {
+            let mut paths:Vec<Path<N>> = Vec::new();
+            for node in graph.node_indices() {
+                let mut cycles_found = get_all_negative_cycles_for_source(graph, node);
+                paths.append(&mut cycles_found);
+            }
+            let mut negative_paths: Vec<Path<N>> = paths.into_iter().filter(|path| path.weight() < 0.0).collect();
+            negative_paths.sort_unstable();
+            negative_paths.dedup_by(|a, b| a.weight().to_bits() == b.weight().to_bits());
+            negative_paths
+        }
+
         // Method 1 for obtaining all negative cycles, sorted from most negative to least.
-        fn get_all_negative_cycles_0<N: Clone>(graph: &Graph<N, f64>) -> Vec<Path<N>> {
+        // Uses find_cycles() on unfiltered graph, may suffer noise in the graph.
+        pub fn get_all_negative_cycles_0<N: Clone>(graph: &Graph<N, f64>) -> Vec<Path<N>> {
             let paths = find_cycles(graph);
             let mut negative_paths: Vec<Path<N>> = paths.into_iter().filter(|path| path.weight() < 0.0).collect();
             negative_paths.sort_unstable();
@@ -205,8 +213,80 @@ mod graph_mod {
             (false, None)
         }
 
+        // Modified queue-based Bellman-Ford algorithm. Only difference with get_negative_cycle_for_source_quick is that we call find_cycles() after a successful has_cycle() call.
+        fn get_all_negative_cycles_for_source<N: Clone>(graph: &Graph<N, f64>, source: NodeIndex) -> Vec<Path<N>> {
+            // Node => Weight of current shortest path from source.
+            let mut dist: HashMap<NodeIndex, f64> = HashMap::new();
+            // Node => Edge in current shortest path with node as target_node.
+            let mut edgeTo: HashMap<NodeIndex, Option<EdgeReference<f64>>> = HashMap::new();
+            let mut queue: VecDeque<NodeIndex> = VecDeque::new();
+            let mut on_queue: HashMap<NodeIndex, bool>= HashMap::new();
+            // Counter of relax operations
+            let mut counter = 0;
+
+            for node in graph.node_indices() {
+                edgeTo.insert(node, None);
+                dist.insert(node, f64::MAX);
+                on_queue.insert(node, false);
+            }
+
+            queue.push_back(source);
+            on_queue.insert(source, true);
+            dist.insert(source, 0.0);
+
+            while !queue.is_empty() {
+                let current_node = queue.pop_front().unwrap();
+                on_queue.insert(source, false);
+
+                // Iterate through all neighbours
+                for edge in graph.edges_directed(current_node, Outgoing) {
+                    let weight = edge.weight();
+                    let target_node = edge.target();
+
+                    // Relax operation
+                    if *dist.get(&target_node).unwrap() > dist.get(&current_node).unwrap() + weight {
+                        *dist.get_mut(&target_node).unwrap() = dist.get(&current_node).unwrap() + weight;
+                        *edgeTo.get_mut(&target_node).unwrap() = Some(edge);
+                        counter += 1;
+
+                        if !on_queue.get(&target_node).unwrap() {
+                            queue.push_back(target_node);
+                            on_queue.insert(target_node, true);
+                        }
+
+                        // Check for cycle every V times we call relax.
+                        if counter % graph.node_count() == 0 {
+                            // Construct current SPT from edgeTo collection
+                            let mut spt: Graph<N, f64> = Graph::new();
+
+                            // Zzz need to implement N: Clone trait just for this one line
+                            // I guess the issue is that `graph` owns N, but to make another graph with the same nodes we need to `copy` the nodes over. So we need to tell the comiler that N is a type that can be safely deep cloned.
+                            for node in graph.node_indices() {
+                                spt.add_node(graph.node_weight(node).unwrap().clone());
+                            }
+
+                            for node in graph.node_indices() {
+                                if let Some(spt_edge) = edgeTo.get(&node).unwrap() {
+                                    let spt_edge_weight = spt_edge.weight();
+                                    let spt_edge_source = spt_edge.source();
+                                    spt.add_edge(spt_edge_source, node, *spt_edge_weight);
+                                }
+                            }
+
+                            let (cycle_found, spt_cycle) = has_cycle(&spt);
+                            if cycle_found {
+                                return find_cycles(&spt);
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Emptied queue without finding cycle
+            vec![]
+        }
+
         // Modified queue-based Bellman-Ford algorithm. O(E) practically, O(V * E) theoretically.
-        // https://konaeakira.github.io/posts/using-the-shortest-path-faster-algorithm-to-find-negative-cycles.html
         fn get_negative_cycle_for_source_quick<N: Clone>(graph: &Graph<N, f64>, source: NodeIndex) -> (bool, Option<Path<N>>) {
             // Node => Weight of current shortest path from source.
             let mut dist: HashMap<NodeIndex, f64> = HashMap::new();
@@ -806,10 +886,8 @@ mod graph_mod {
 
             let cycles = get_all_negative_cycles_0(&graph);
             assert!(cycles.is_empty());
-
-            // let (negative_cycle_found, cycle) = get_negative_cycle_quick(&graph);
-            // assert!(!negative_cycle_found);
-            // assert!(cycle.is_none());
+            let cycles = get_all_negative_cycles_1(&graph);
+            assert!(cycles.is_empty());
         }
 
         // Test has_cycle() on a DAG, should not find a cycle.
@@ -836,6 +914,8 @@ mod graph_mod {
             graph.add_edge(nodes[6], nodes[4], 0.93);
 
             let cycles = get_all_negative_cycles_0(&graph);
+            assert!(cycles.is_empty());
+            let cycles = get_all_negative_cycles_1(&graph);
             assert!(cycles.is_empty());
         }
 
@@ -864,6 +944,8 @@ mod graph_mod {
             graph.add_edge(nodes[6], nodes[4], 0.93);
 
             let cycles = get_all_negative_cycles_0(&graph);
+            assert!(cycles.len() == 2);
+            let cycles = get_all_negative_cycles_1(&graph);
             assert!(cycles.len() == 2);
         }
     }
