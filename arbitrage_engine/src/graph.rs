@@ -157,6 +157,17 @@ mod graph_mod {
             hash::Hash,
         };
 
+        // Attempts get_negative_cycle_for_source_quick for all nodes, stops if it finds a negative cycle
+        fn get_negative_cycle_quick<N: Clone>(graph: &Graph<N, f64>) -> (bool, Option<Path<N>>) {
+            for node in graph.node_indices() {
+                let (negative_cycle_found, cycle) = get_negative_cycle_for_source_quick(graph, node);
+                if negative_cycle_found {
+                    return (negative_cycle_found, cycle);
+                }
+            }
+            (false, None)
+        }
+
         // Modified queue-based Bellman-Ford algorithm. O(E) practically, O(V * E) theoretically.
         // https://konaeakira.github.io/posts/using-the-shortest-path-faster-algorithm-to-find-negative-cycles.html
         fn get_negative_cycle_for_source_quick<N: Clone>(graph: &Graph<N, f64>, source: NodeIndex) -> (bool, Option<Path<N>>) {
@@ -668,6 +679,10 @@ mod graph_mod {
             let (negative_cycle_found, cycle) = get_negative_cycle_for_source_quick(&graph, nodes[0]);
             assert!(!negative_cycle_found);
             assert!(cycle.is_none());
+
+            let (negative_cycle_found, cycle) = get_negative_cycle_quick(&graph);
+            assert!(!negative_cycle_found);
+            assert!(cycle.is_none());
         }
 
         // Test has_cycle() on a DAG, should not find a cycle.
@@ -694,6 +709,9 @@ mod graph_mod {
             graph.add_edge(nodes[6], nodes[4], 0.93);
 
             let (negative_cycle_found, cycle) = get_negative_cycle_for_source_quick(&graph, nodes[0]);
+            assert!(!negative_cycle_found);
+            assert!(cycle.is_none());
+            let (negative_cycle_found, cycle) = get_negative_cycle_quick(&graph);
             assert!(!negative_cycle_found);
             assert!(cycle.is_none());
         }
