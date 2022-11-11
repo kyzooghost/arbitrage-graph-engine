@@ -22,6 +22,7 @@ dependencies = [
  "futures",
  "hex",
  "hexlit",
+ "petgraph",
  "serde_json",
  "tokio",
  "tokio-test",
