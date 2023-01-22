@@ -15,6 +15,7 @@ arbitrage_engine = { path = "../arbitrage_engine" }
 serde_json = "1.0"
 futures = "0.3.24"
 petgraph = "0.6.2"
+dotenv = "0.15.0"
 
 [dev-dependencies]
 tokio-test = "*"

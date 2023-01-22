@@ -1,8 +1,6 @@
 pub use utils_mod::*;
 
 mod utils_mod {
-    use std::ops::Div;
-
     use ethers::types::{Address, U256};
     
     pub fn is_zero_address(address: Address) -> bool {

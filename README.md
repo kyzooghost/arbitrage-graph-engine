@@ -14,3 +14,5 @@ Run unit tests without silencing stdout
 ```
 cargo test -- --nocapture
 ```
+
+cargo test uniswap_v2_basic_integration_test -- --nocapture --quiet

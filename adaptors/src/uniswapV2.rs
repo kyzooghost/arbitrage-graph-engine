@@ -1,15 +1,19 @@
-#![allow(dead_code, unused)]
+#![allow(dead_code, unused, nonstandard_style)]
 
 pub use uniswapV2_mod::*;
 
 mod uniswapV2_mod {
     use ethers::{
         providers::{Provider, JsonRpcClient},
-        contract::Contract,
+        contract::{Contract, Multicall, abigen},
         types::{Address, U64, U128, U256},
-        core::abi::Abi
+        core::{
+            abi::{Abi, Token},
+            utils::id,
+            types::Bytes
+        }
     };
-    
+
     use std::{
         fs::File,
         sync::Arc,
@@ -35,6 +39,11 @@ mod uniswapV2_mod {
         prelude::{EdgeIndex, NodeIndex},
     };
 
+    use dotenv::dotenv;
+
+    abigen!(MulticallV1Contract, "src/abis/Multicall.json");
+    abigen!(UniswapV2Pair, "src/abis/UniswapV2Pair.json");
+
     #[derive(Debug)]
     struct TokenPair {
         token0: Address,
@@ -54,24 +63,31 @@ mod uniswapV2_mod {
     struct UniswapV2ArbitrageFinder<P: JsonRpcClient> {
         factory: Contract<Arc<Provider<P>>>,
         router: Contract<Arc<Provider<P>>>,
+        // multicall: Contract<Arc<Provider<P>>>,
+        multicall: MulticallV1Contract<Provider<P>>,
         tokens: Vec<Address>,
         token_pairs: Vec<TokenPair>,
         provider: Arc<Provider<P>>
     }
 
     impl<P: JsonRpcClient + 'static> UniswapV2ArbitrageFinder<P> {
-        pub fn new(factory_address: Address, router_address: Address, provider_: Provider<P>) -> Result<Self,> {
+        pub fn new(factory_address: Address, router_address: Address, multicall_address: Address ,provider_: Provider<P>) -> Result<Self,> {
             let factory_abi_file = File::open("src/abis/UniswapV2Factory.json")?;
             let router_abi_file = File::open("src/abis/UniswapV2Router.json")?;
+            let multicall_abi_file = File::open("src/abis/Multicall.json")?;
             let factory_abi: Abi = serde_json::from_reader(factory_abi_file)?;
             let router_abi: Abi = serde_json::from_reader(router_abi_file)?;
+            let multicall_abi: Abi = serde_json::from_reader(multicall_abi_file)?;
             let wrapped_provider = Arc::new(provider_);
             let factory: Contract<Arc<Provider<P>>> = Contract::new(factory_address, factory_abi, Arc::clone(&wrapped_provider));
             let router: Contract<Arc<Provider<P>>> = Contract::new(router_address, router_abi, Arc::clone(&wrapped_provider));
+            // let multicall: Contract<Arc<Provider<P>>> = Contract::new(multicall_address, multicall_abi, Arc::clone(&wrapped_provider));
+            let multicall = MulticallV1Contract::new(multicall_address, Arc::clone(&wrapped_provider));
 
             Ok(UniswapV2ArbitrageFinder {         
                 factory,
                 router,
+                multicall,
                 tokens: Vec::new(),
                 token_pairs: Vec::new(),
                 provider: Arc::clone(&wrapped_provider) 
@@ -79,35 +95,37 @@ mod uniswapV2_mod {
         }
 
         pub async fn add_token(&mut self, token_address: Address) -> Result<()>  {
-            // For each pre-existing token, attempt to find the pair
-            let mut get_pair_futures = Vec::new();
+            // Use Multicall on UniswapFactory to find all existing pairs between new token, and existing tokens
+            let mut multicall_vec: Vec<(Address, Bytes)> = Vec::new();
 
             for token in self.tokens.iter() {
-                let get_pair_future = self.factory
-                    .method::<_, Address>("getPair", (*token, token_address))?
-                    .call()
-                    .await;
-
-                get_pair_futures.push(tokio::spawn(async move {get_pair_future}));
+                multicall_vec.push((self.factory.address(), self.factory.encode_with_selector(id("getPair(address,address)"), (token_address, *token)).unwrap()));
             }
 
-            let wrapped_pairs = join_all(get_pair_futures).await;
+            if !multicall_vec.is_empty() {
+                let call = self.multicall.aggregate(multicall_vec);
+                let (_, pairs_as_bytes_vec) = call.call().await?;
+                let pairs_as_address_vec: Vec<Address> = pairs_as_bytes_vec.into_iter().map(|x| {
+                    let mut address_bytes = [0u8; 20];
+                    address_bytes.copy_from_slice(&x[12..]);
+                    Address::from(address_bytes)
+                }).collect();
 
-            for (i, token) in self.tokens.iter().enumerate() {
-                if wrapped_pairs[i].is_ok() && wrapped_pairs[i].as_ref().unwrap().as_ref().is_ok() {
-                    let pair = wrapped_pairs[i].as_ref().unwrap().as_ref().unwrap();
-                    if !is_zero_address(*pair) {
-                        if *token > token_address {
+                for (i, token) in self.tokens.iter().enumerate() {
+                    let pair_address = pairs_as_address_vec[i];
+
+                    if !is_zero_address(pair_address) {
+                        if token > &token_address {
                             self.token_pairs.push(TokenPair{
                                 token0: token_address,
                                 token1: *token,
-                                lptoken: *pair
+                                lptoken: pair_address
                             });
                         } else {
                             self.token_pairs.push(TokenPair{
                                 token0: *token,
                                 token1: token_address,
-                                lptoken: *pair
+                                lptoken: pair_address
                             });
                         }
                     }
@@ -161,28 +179,26 @@ mod uniswapV2_mod {
                 nodes.insert(self.tokens[i], graph.add_node(self.tokens[i]));
             }
 
-            // Get rates for each pair
-            let pair_abi_file = File::open("src/abis/UniswapV2Pair.json")?;
-            let pair_abi: Abi = serde_json::from_reader(pair_abi_file)?;
-            let mut get_reserve_futures = Vec::new();
+            // Use Multicall to get reserves for each pair
+
+            let mut multicall_vec: Vec<(Address, Bytes)> = Vec::new();
+            let generic_pair_contract = UniswapV2Pair::new(Address::zero(), Arc::clone(&self.provider));
 
             for pair_address in self.token_pairs.iter() {
-                let pair_contract: Contract<Arc<Provider<P>>> = Contract::new(pair_address.lptoken, pair_abi.clone(), Arc::clone(&self.provider));
-
-                let get_reserve_future = pair_contract
-                    .method::<_, (U256, U256, U256)>("getReserves", ())?
-                    .call()
-                    .await;
-
-                get_reserve_futures.push(tokio::spawn(async move {get_reserve_future}));
+                let pair_contract = UniswapV2Pair::new(pair_address.lptoken, Arc::clone(&self.provider));
+                multicall_vec.push((pair_contract.address(), pair_contract.encode_with_selector(id("getReserves()"), ()).unwrap()));
             }
-            let wrapped_reserves = join_all(get_reserve_futures).await;
-            let mut pairs_with_price: Vec<TokenExchangeRates> = Vec::new();
-            for (i, pair_struct) in self.token_pairs.iter().enumerate() {
-                if wrapped_reserves[i].is_ok() && wrapped_reserves[i].as_ref().unwrap().as_ref().is_ok() {
-                    let reserve = wrapped_reserves[i].as_ref().unwrap().as_ref().unwrap();
-                    let reserve0 = reserve.0;
-                    let reserve1 = reserve.1;
+
+            if !multicall_vec.is_empty() {
+                let mut pairs_with_price: Vec<TokenExchangeRates> = Vec::new();
+                let call = self.multicall.aggregate(multicall_vec);
+                let (_, unparsed_reserves_vec) = call.call().await?;
+
+                for (i, pair_struct) in self.token_pairs.iter().enumerate() {
+                    let unparsed_reserves = &unparsed_reserves_vec[i];
+                    let reserves = generic_pair_contract.decode_output_with_selector::<(U256, U256, U256), &Bytes>(id("getReserves()"), unparsed_reserves).unwrap();
+                    let reserve0 = reserves.0;
+                    let reserve1 = reserves.1;
 
                     // Use UniswapV2Router.getAmountOut() implementation, with 1e18 token0 going in
                     let amount_in_with_fee = one_ether().checked_mul(U256::from_dec_str("997")?).unwrap();
@@ -198,37 +214,40 @@ mod uniswapV2_mod {
                         token1_to_token0_rate: u256_to_f64(token1_to_token0_price),
                     });
                 }
+
+                // Add rates as nodes to graph
+                for pair in pairs_with_price.iter() {
+                    graph.add_edge(
+                        *nodes.get(&pair.token0).unwrap(), 
+                        *nodes.get(&pair.token1).unwrap(),
+                        pair.token0_to_token1_rate
+                    );
+
+                    graph.add_edge(
+                        *nodes.get(&pair.token1).unwrap(), 
+                        *nodes.get(&pair.token0).unwrap(),
+                        pair.token1_to_token0_rate
+                    );
+                }
+
+                let (is_arbitrage, arbitrage_path) = get_negative_cycle_quick(&graph);
+
+                logObject("is_arbitrage: ", &is_arbitrage);
+                logObject("arbitrage_path: ", &arbitrage_path);
             }
-
-            // Add rates as nodes to graph
-            for pair in pairs_with_price.iter() {
-                graph.add_edge(
-                    *nodes.get(&pair.token0).unwrap(), 
-                    *nodes.get(&pair.token1).unwrap(),
-                    pair.token0_to_token1_rate
-                );
-
-                graph.add_edge(
-                    *nodes.get(&pair.token1).unwrap(), 
-                    *nodes.get(&pair.token0).unwrap(),
-                    pair.token1_to_token0_rate
-                );
-            }
-
-            let (is_arbitrage, arbitrage_path) = get_negative_cycle_quick(&graph);
-
-            logObject("is_arbitrage: ", &is_arbitrage);
-            logObject("arbitrage_path: ", &arbitrage_path);
             Ok(())
         }
     }
 
     #[tokio::test]
     async fn uniswap_v2_basic_integration_test() -> Result<()> {
-        let provider = Provider::try_from("https://eth-mainnet.g.alchemy.com/v2/demo")?;
+        dotenv().ok();
+        let MAINNET_URL = std::env::var("MAINNET_URL").unwrap();
+        let provider = Provider::try_from(MAINNET_URL)?;
         let factory_address = "0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f".parse::<Address>()?;
         let router_address = "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D".parse::<Address>()?;
-        let mut arbitrage_finder = UniswapV2ArbitrageFinder::new(factory_address, router_address, provider)?;
+        let multicall_address = "0xeefBa1e63905eF1D7ACbA5a8513c70307C1cE441".parse::<Address>()?;
+        let mut arbitrage_finder = UniswapV2ArbitrageFinder::new(factory_address, router_address, multicall_address, provider)?;
         assert!(&arbitrage_finder.tokens().is_empty());
 
         let dai = "0x6B175474E89094C44Da98b954EedeAC495271d0F".parse::<Address>()?;
@@ -253,76 +272,77 @@ mod uniswapV2_mod {
         arbitrage_finder.add_token(bal).await?;
         assert!(arbitrage_finder.tokens().len() == 3_usize);
         assert!(arbitrage_finder.token_pairs().len() == 3_usize);
-        arbitrage_finder.find_local_arbitrage().await?;
-
-        // let rad = "0x31c8eacbffdd875c74b94b077895bd78cf1e64a3".parse::<Address>()?;
-        // let paxg = "0x45804880de22913dafe09f4980848ece6ecbaf78".parse::<Address>()?;
-        // let uni = "0x1f9840a85d5af5bf1d1762f925bdaddc4201f984".parse::<Address>()?;
-        // let elon = "0x761d38e5ddf6ccf6cf7c55759d5210750b5d60f3".parse::<Address>()?;
-        // let fox = "0xc770eefad204b5180df6a14ee197d99d808ee52d".parse::<Address>()?;
-        // let wbtc = "0x2260fac5e5542a773aa44fbcfedf7c193bc2c599".parse::<Address>()?;
-        // arbitrage_finder.add_token(rad).await?;
-        // arbitrage_finder.add_token(paxg).await?;
-        // arbitrage_finder.add_token(uni).await?;
-        // arbitrage_finder.add_token(elon).await?;
-        // arbitrage_finder.add_token(fox).await?;
-        // arbitrage_finder.add_token(wbtc).await?;
-        // let start = Instant::now();
-        // arbitrage_finder.find_local_arbitrage().await?;
-        // let duration = start.elapsed();
-        // println!("Time elapsed in find_local_arbitrage() is: {:?}", duration);
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn spookyswap_basic_integration_test() -> Result<()> {
-        let provider = Provider::try_from("https://rpc.ftm.tools")?;
-        let factory_address = "0x152ee697f2e276fa89e96742e9bb9ab1f2e61be3".parse::<Address>()?;
-        let router_address = "0xf491e7b69e4244ad4002bc14e878a34207e38c29".parse::<Address>()?;
-        let mut arbitrage_finder = UniswapV2ArbitrageFinder::new(factory_address, router_address, provider)?;
-        assert!(&arbitrage_finder.tokens().is_empty());
-
-        let wftm = "0x21be370d5312f44cb42ce377bc9b8a0cef1a4c83".parse::<Address>()?;
-        let usdc = "0x04068da6c83afcfa0e13ba15a6696662335d5b75".parse::<Address>()?;
-        let spa = "0x5602df4a94eb6c680190accfa2a475621e0ddbdc".parse::<Address>()?;
-        let eth = "0x74b23882a30290451a17c44f4f05243b6b58c76d".parse::<Address>()?;
-        let btc = "0x321162cd933e2be498cd2267a90534a804051b11".parse::<Address>()?;
-        let boo = "0x841fad6eae12c286d1fd18d1d525dffa75c7effe".parse::<Address>()?;
-        let midas = "0xb37528da6b4d378305d000a66ad91bd88e626761".parse::<Address>()?;
-        let hec = "0x5c4fdfc5233f935f20d2adba572f770c2e377ab0".parse::<Address>()?;
-        let link = "0xb3654dc3d10ea7645f8319668e8f54d2574fbdc8".parse::<Address>()?;
-        let mimatic = "0xfb98b335551a418cd0737375a2ea0ded62ea213b".parse::<Address>()?;
-        let tomb = "0x6c021ae822bea943b2e66552bde1d2696a53fbb7".parse::<Address>()?;
-        let tor = "0x74e23df9110aa9ea0b6ff2faee01e740ca1c642e".parse::<Address>()?;
-        let mim = "0x82f0b8b456c1a451378467398982d4834b6829c1".parse::<Address>()?;
-        let stg = "0x2f6f07cdcf3588944bf4c42ac74ff24bf56e7590".parse::<Address>()?;
-        let bnb = "0xd67de0e0a0fd7b15dc8348bb9be742f3c5850454".parse::<Address>()?;
-        let geist = "0xd8321aa83fb0a4ecd6348d4577431310a6e0814d".parse::<Address>()?;
-        let scream = "0xe0654c8e6fd4d733349ac7e09f6f23da256bf475".parse::<Address>()?;
-        let oath = "0x21ada0d2ac28c3a5fa3cd2ee30882da8812279b6".parse::<Address>()?;
 
         let start = Instant::now();
-        arbitrage_finder.add_token(wftm).await?;
-        arbitrage_finder.add_token(usdc).await?;
-        arbitrage_finder.add_token(spa).await?;
-        arbitrage_finder.add_token(eth).await?;
-        arbitrage_finder.add_token(btc).await?;
-        arbitrage_finder.add_token(boo).await?;
-        arbitrage_finder.add_token(midas).await?;
-        arbitrage_finder.add_token(hec).await?;
-        arbitrage_finder.add_token(link).await?;
-        arbitrage_finder.add_token(mimatic).await?;
-        arbitrage_finder.add_token(tomb).await?;
-        arbitrage_finder.add_token(tor).await?;
-        arbitrage_finder.add_token(mim).await?;
-        arbitrage_finder.add_token(stg).await?;
-        arbitrage_finder.add_token(bnb).await?;
-        arbitrage_finder.add_token(geist).await?;
-        arbitrage_finder.add_token(scream).await?;
-        arbitrage_finder.add_token(oath).await?;
         arbitrage_finder.find_local_arbitrage().await?;
+
+    //     // let rad = "0x31c8eacbffdd875c74b94b077895bd78cf1e64a3".parse::<Address>()?;
+    //     // let paxg = "0x45804880de22913dafe09f4980848ece6ecbaf78".parse::<Address>()?;
+    //     // let uni = "0x1f9840a85d5af5bf1d1762f925bdaddc4201f984".parse::<Address>()?;
+    //     // let elon = "0x761d38e5ddf6ccf6cf7c55759d5210750b5d60f3".parse::<Address>()?;
+    //     // let fox = "0xc770eefad204b5180df6a14ee197d99d808ee52d".parse::<Address>()?;
+    //     // let wbtc = "0x2260fac5e5542a773aa44fbcfedf7c193bc2c599".parse::<Address>()?;
+    //     // arbitrage_finder.add_token(rad).await?;
+    //     // arbitrage_finder.add_token(paxg).await?;
+    //     // arbitrage_finder.add_token(uni).await?;
+    //     // arbitrage_finder.add_token(elon).await?;
+    //     // arbitrage_finder.add_token(fox).await?;
+    //     // arbitrage_finder.add_token(wbtc).await?;
+    //     // arbitrage_finder.find_local_arbitrage().await?;
         let duration = start.elapsed();
         println!("Time elapsed in find_local_arbitrage() is: {:?}", duration);
         Ok(())
     }
+
+    // #[tokio::test]
+    // async fn spookyswap_basic_integration_test() -> Result<()> {
+    //     let provider = Provider::try_from("https://rpc.ftm.tools")?;
+    //     let factory_address = "0x152ee697f2e276fa89e96742e9bb9ab1f2e61be3".parse::<Address>()?;
+    //     let router_address = "0xf491e7b69e4244ad4002bc14e878a34207e38c29".parse::<Address>()?;
+    //     let mut arbitrage_finder = UniswapV2ArbitrageFinder::new(factory_address, router_address, provider)?;
+    //     assert!(&arbitrage_finder.tokens().is_empty());
+
+    //     let wftm = "0x21be370d5312f44cb42ce377bc9b8a0cef1a4c83".parse::<Address>()?;
+    //     let usdc = "0x04068da6c83afcfa0e13ba15a6696662335d5b75".parse::<Address>()?;
+    //     let spa = "0x5602df4a94eb6c680190accfa2a475621e0ddbdc".parse::<Address>()?;
+    //     let eth = "0x74b23882a30290451a17c44f4f05243b6b58c76d".parse::<Address>()?;
+    //     let btc = "0x321162cd933e2be498cd2267a90534a804051b11".parse::<Address>()?;
+    //     let boo = "0x841fad6eae12c286d1fd18d1d525dffa75c7effe".parse::<Address>()?;
+    //     let midas = "0xb37528da6b4d378305d000a66ad91bd88e626761".parse::<Address>()?;
+    //     let hec = "0x5c4fdfc5233f935f20d2adba572f770c2e377ab0".parse::<Address>()?;
+    //     let link = "0xb3654dc3d10ea7645f8319668e8f54d2574fbdc8".parse::<Address>()?;
+    //     let mimatic = "0xfb98b335551a418cd0737375a2ea0ded62ea213b".parse::<Address>()?;
+    //     let tomb = "0x6c021ae822bea943b2e66552bde1d2696a53fbb7".parse::<Address>()?;
+    //     let tor = "0x74e23df9110aa9ea0b6ff2faee01e740ca1c642e".parse::<Address>()?;
+    //     let mim = "0x82f0b8b456c1a451378467398982d4834b6829c1".parse::<Address>()?;
+    //     let stg = "0x2f6f07cdcf3588944bf4c42ac74ff24bf56e7590".parse::<Address>()?;
+    //     let bnb = "0xd67de0e0a0fd7b15dc8348bb9be742f3c5850454".parse::<Address>()?;
+    //     let geist = "0xd8321aa83fb0a4ecd6348d4577431310a6e0814d".parse::<Address>()?;
+    //     let scream = "0xe0654c8e6fd4d733349ac7e09f6f23da256bf475".parse::<Address>()?;
+    //     let oath = "0x21ada0d2ac28c3a5fa3cd2ee30882da8812279b6".parse::<Address>()?;
+
+    //     let start = Instant::now();
+    //     arbitrage_finder.add_token(wftm).await?;
+    //     arbitrage_finder.add_token(usdc).await?;
+    //     arbitrage_finder.add_token(spa).await?;
+    //     arbitrage_finder.add_token(eth).await?;
+    //     arbitrage_finder.add_token(btc).await?;
+    //     arbitrage_finder.add_token(boo).await?;
+    //     arbitrage_finder.add_token(midas).await?;
+    //     arbitrage_finder.add_token(hec).await?;
+    //     arbitrage_finder.add_token(link).await?;
+    //     arbitrage_finder.add_token(mimatic).await?;
+    //     arbitrage_finder.add_token(tomb).await?;
+    //     arbitrage_finder.add_token(tor).await?;
+    //     arbitrage_finder.add_token(mim).await?;
+    //     arbitrage_finder.add_token(stg).await?;
+    //     arbitrage_finder.add_token(bnb).await?;
+    //     arbitrage_finder.add_token(geist).await?;
+    //     arbitrage_finder.add_token(scream).await?;
+    //     arbitrage_finder.add_token(oath).await?;
+    //     arbitrage_finder.find_local_arbitrage().await?;
+    //     let duration = start.elapsed();
+    //     println!("Time elapsed in find_local_arbitrage() is: {:?}", duration);
+    //     Ok(())
+    // }
 }

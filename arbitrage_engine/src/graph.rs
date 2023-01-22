@@ -1,3 +1,5 @@
+#![allow(dead_code, unused, nonstandard_style)]
+
 pub use graph_mod::*;
 
 mod graph_mod {

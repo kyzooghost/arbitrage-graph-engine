@@ -1,3 +1,5 @@
+#![allow(dead_code, unused, nonstandard_style)]
+
 pub use utils_mod::*;
 
 mod utils_mod {
