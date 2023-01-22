@@ -213,6 +213,9 @@ mod uniswapV2_mod {
                         token0_to_token1_rate: u256_to_f64(token0_to_token1_rate),
                         token1_to_token0_rate: u256_to_f64(token1_to_token0_price),
                     });
+
+                    logObject("rate: ", &pairs_with_price.last());
+                    logText("---");
                 }
 
                 // Add rates as nodes to graph
@@ -272,77 +275,77 @@ mod uniswapV2_mod {
         arbitrage_finder.add_token(bal).await?;
         assert!(arbitrage_finder.tokens().len() == 3_usize);
         assert!(arbitrage_finder.token_pairs().len() == 3_usize);
+        let rad = "0x31c8eacbffdd875c74b94b077895bd78cf1e64a3".parse::<Address>()?;
+        let paxg = "0x45804880de22913dafe09f4980848ece6ecbaf78".parse::<Address>()?;
+        let uni = "0x1f9840a85d5af5bf1d1762f925bdaddc4201f984".parse::<Address>()?;
+        let elon = "0x761d38e5ddf6ccf6cf7c55759d5210750b5d60f3".parse::<Address>()?;
+        let fox = "0xc770eefad204b5180df6a14ee197d99d808ee52d".parse::<Address>()?;
+        let wbtc = "0x2260fac5e5542a773aa44fbcfedf7c193bc2c599".parse::<Address>()?;
+        arbitrage_finder.add_token(rad).await?;
+        arbitrage_finder.add_token(paxg).await?;
+        arbitrage_finder.add_token(uni).await?;
+        arbitrage_finder.add_token(elon).await?;
+        arbitrage_finder.add_token(fox).await?;
+        arbitrage_finder.add_token(wbtc).await?;
 
         let start = Instant::now();
         arbitrage_finder.find_local_arbitrage().await?;
-
-    //     // let rad = "0x31c8eacbffdd875c74b94b077895bd78cf1e64a3".parse::<Address>()?;
-    //     // let paxg = "0x45804880de22913dafe09f4980848ece6ecbaf78".parse::<Address>()?;
-    //     // let uni = "0x1f9840a85d5af5bf1d1762f925bdaddc4201f984".parse::<Address>()?;
-    //     // let elon = "0x761d38e5ddf6ccf6cf7c55759d5210750b5d60f3".parse::<Address>()?;
-    //     // let fox = "0xc770eefad204b5180df6a14ee197d99d808ee52d".parse::<Address>()?;
-    //     // let wbtc = "0x2260fac5e5542a773aa44fbcfedf7c193bc2c599".parse::<Address>()?;
-    //     // arbitrage_finder.add_token(rad).await?;
-    //     // arbitrage_finder.add_token(paxg).await?;
-    //     // arbitrage_finder.add_token(uni).await?;
-    //     // arbitrage_finder.add_token(elon).await?;
-    //     // arbitrage_finder.add_token(fox).await?;
-    //     // arbitrage_finder.add_token(wbtc).await?;
-    //     // arbitrage_finder.find_local_arbitrage().await?;
         let duration = start.elapsed();
         println!("Time elapsed in find_local_arbitrage() is: {:?}", duration);
         Ok(())
     }
 
-    // #[tokio::test]
-    // async fn spookyswap_basic_integration_test() -> Result<()> {
-    //     let provider = Provider::try_from("https://rpc.ftm.tools")?;
-    //     let factory_address = "0x152ee697f2e276fa89e96742e9bb9ab1f2e61be3".parse::<Address>()?;
-    //     let router_address = "0xf491e7b69e4244ad4002bc14e878a34207e38c29".parse::<Address>()?;
-    //     let mut arbitrage_finder = UniswapV2ArbitrageFinder::new(factory_address, router_address, provider)?;
-    //     assert!(&arbitrage_finder.tokens().is_empty());
+    #[tokio::test]
+    async fn spookyswap_basic_integration_test() -> Result<()> {
+        let provider = Provider::try_from("https://rpc.ftm.tools")?;
+        let factory_address = "0x152ee697f2e276fa89e96742e9bb9ab1f2e61be3".parse::<Address>()?;
+        let router_address = "0xf491e7b69e4244ad4002bc14e878a34207e38c29".parse::<Address>()?;
+        let multicall_address = "0xb828C456600857abd4ed6C32FAcc607bD0464F4F".parse::<Address>()?;
+        let mut arbitrage_finder = UniswapV2ArbitrageFinder::new(factory_address, router_address, multicall_address, provider)?;
+        assert!(&arbitrage_finder.tokens().is_empty());
 
-    //     let wftm = "0x21be370d5312f44cb42ce377bc9b8a0cef1a4c83".parse::<Address>()?;
-    //     let usdc = "0x04068da6c83afcfa0e13ba15a6696662335d5b75".parse::<Address>()?;
-    //     let spa = "0x5602df4a94eb6c680190accfa2a475621e0ddbdc".parse::<Address>()?;
-    //     let eth = "0x74b23882a30290451a17c44f4f05243b6b58c76d".parse::<Address>()?;
-    //     let btc = "0x321162cd933e2be498cd2267a90534a804051b11".parse::<Address>()?;
-    //     let boo = "0x841fad6eae12c286d1fd18d1d525dffa75c7effe".parse::<Address>()?;
-    //     let midas = "0xb37528da6b4d378305d000a66ad91bd88e626761".parse::<Address>()?;
-    //     let hec = "0x5c4fdfc5233f935f20d2adba572f770c2e377ab0".parse::<Address>()?;
-    //     let link = "0xb3654dc3d10ea7645f8319668e8f54d2574fbdc8".parse::<Address>()?;
-    //     let mimatic = "0xfb98b335551a418cd0737375a2ea0ded62ea213b".parse::<Address>()?;
-    //     let tomb = "0x6c021ae822bea943b2e66552bde1d2696a53fbb7".parse::<Address>()?;
-    //     let tor = "0x74e23df9110aa9ea0b6ff2faee01e740ca1c642e".parse::<Address>()?;
-    //     let mim = "0x82f0b8b456c1a451378467398982d4834b6829c1".parse::<Address>()?;
-    //     let stg = "0x2f6f07cdcf3588944bf4c42ac74ff24bf56e7590".parse::<Address>()?;
-    //     let bnb = "0xd67de0e0a0fd7b15dc8348bb9be742f3c5850454".parse::<Address>()?;
-    //     let geist = "0xd8321aa83fb0a4ecd6348d4577431310a6e0814d".parse::<Address>()?;
-    //     let scream = "0xe0654c8e6fd4d733349ac7e09f6f23da256bf475".parse::<Address>()?;
-    //     let oath = "0x21ada0d2ac28c3a5fa3cd2ee30882da8812279b6".parse::<Address>()?;
+        let wftm = "0x21be370d5312f44cb42ce377bc9b8a0cef1a4c83".parse::<Address>()?;
+        let usdc = "0x04068da6c83afcfa0e13ba15a6696662335d5b75".parse::<Address>()?;
+        let spa = "0x5602df4a94eb6c680190accfa2a475621e0ddbdc".parse::<Address>()?;
+        let eth = "0x74b23882a30290451a17c44f4f05243b6b58c76d".parse::<Address>()?;
+        let btc = "0x321162cd933e2be498cd2267a90534a804051b11".parse::<Address>()?;
+        let boo = "0x841fad6eae12c286d1fd18d1d525dffa75c7effe".parse::<Address>()?;
+        let midas = "0xb37528da6b4d378305d000a66ad91bd88e626761".parse::<Address>()?;
+        let hec = "0x5c4fdfc5233f935f20d2adba572f770c2e377ab0".parse::<Address>()?;
+        let link = "0xb3654dc3d10ea7645f8319668e8f54d2574fbdc8".parse::<Address>()?;
+        let mimatic = "0xfb98b335551a418cd0737375a2ea0ded62ea213b".parse::<Address>()?;
+        let tomb = "0x6c021ae822bea943b2e66552bde1d2696a53fbb7".parse::<Address>()?;
+        let tor = "0x74e23df9110aa9ea0b6ff2faee01e740ca1c642e".parse::<Address>()?;
+        let mim = "0x82f0b8b456c1a451378467398982d4834b6829c1".parse::<Address>()?;
+        let stg = "0x2f6f07cdcf3588944bf4c42ac74ff24bf56e7590".parse::<Address>()?;
+        let bnb = "0xd67de0e0a0fd7b15dc8348bb9be742f3c5850454".parse::<Address>()?;
+        let geist = "0xd8321aa83fb0a4ecd6348d4577431310a6e0814d".parse::<Address>()?;
+        let scream = "0xe0654c8e6fd4d733349ac7e09f6f23da256bf475".parse::<Address>()?;
+        let oath = "0x21ada0d2ac28c3a5fa3cd2ee30882da8812279b6".parse::<Address>()?;
 
-    //     let start = Instant::now();
-    //     arbitrage_finder.add_token(wftm).await?;
-    //     arbitrage_finder.add_token(usdc).await?;
-    //     arbitrage_finder.add_token(spa).await?;
-    //     arbitrage_finder.add_token(eth).await?;
-    //     arbitrage_finder.add_token(btc).await?;
-    //     arbitrage_finder.add_token(boo).await?;
-    //     arbitrage_finder.add_token(midas).await?;
-    //     arbitrage_finder.add_token(hec).await?;
-    //     arbitrage_finder.add_token(link).await?;
-    //     arbitrage_finder.add_token(mimatic).await?;
-    //     arbitrage_finder.add_token(tomb).await?;
-    //     arbitrage_finder.add_token(tor).await?;
-    //     arbitrage_finder.add_token(mim).await?;
-    //     arbitrage_finder.add_token(stg).await?;
-    //     arbitrage_finder.add_token(bnb).await?;
-    //     arbitrage_finder.add_token(geist).await?;
-    //     arbitrage_finder.add_token(scream).await?;
-    //     arbitrage_finder.add_token(oath).await?;
-    //     arbitrage_finder.find_local_arbitrage().await?;
-    //     let duration = start.elapsed();
-    //     println!("Time elapsed in find_local_arbitrage() is: {:?}", duration);
-    //     Ok(())
-    // }
+        arbitrage_finder.add_token(wftm).await?;
+        arbitrage_finder.add_token(usdc).await?;
+        arbitrage_finder.add_token(spa).await?;
+        arbitrage_finder.add_token(eth).await?;
+        arbitrage_finder.add_token(btc).await?;
+        arbitrage_finder.add_token(boo).await?;
+        arbitrage_finder.add_token(midas).await?;
+        arbitrage_finder.add_token(hec).await?;
+        arbitrage_finder.add_token(link).await?;
+        arbitrage_finder.add_token(mimatic).await?;
+        arbitrage_finder.add_token(tomb).await?;
+        arbitrage_finder.add_token(tor).await?;
+        arbitrage_finder.add_token(mim).await?;
+        arbitrage_finder.add_token(stg).await?;
+        arbitrage_finder.add_token(bnb).await?;
+        arbitrage_finder.add_token(geist).await?;
+        arbitrage_finder.add_token(scream).await?;
+        arbitrage_finder.add_token(oath).await?;
+
+        let start = Instant::now();
+        arbitrage_finder.find_local_arbitrage().await?;
+        let duration = start.elapsed();
+        println!("Time elapsed in find_local_arbitrage() is: {:?}", duration);
+        Ok(())
+    }
 }
