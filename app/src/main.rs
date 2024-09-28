@@ -6,9 +6,10 @@ use eyre::Result;
 #[tokio::main]
 async fn main() -> Result<()> {
     println!("Hello, world");
-    // let mut a: Vec<Vec<usize>> = Vec::new();
-    // a.push(Vec::new());
-    // println!("{:?}", a[0]);
-    // println!("{:?}", a[1]);
+
+    // TODO - Set up loop that listens for messages from external process
+    // external_request_handler component, with interface and specific implementation
+    // external_request_handler.listen
+
     Ok(())
 }

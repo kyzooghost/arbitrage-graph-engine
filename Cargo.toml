@@ -1,6 +1,5 @@
 [workspace]
 members = [
-    "adaptors",
     "app",
     "arbitrage_engine"
-]
+, "request_handler/request_handler"]
