@@ -22,15 +22,6 @@ API:
 # TODO
 
 Loop in main.rs that waits on messages from another process
+
 Handler for external process messages
 -> API for arbitrage_engine
-
-# CLI commands
-
-Run unit tests without silencing stdout
-
-```
-cargo test -- --nocapture
-```
-
-cargo test uniswap_v2_basic_integration_test -- --nocapture --quiet

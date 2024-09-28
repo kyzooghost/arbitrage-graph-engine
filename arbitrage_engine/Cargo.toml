@@ -8,3 +8,4 @@ edition = "2021"
 [dependencies]
 petgraph = "0.6.2"
 colored = "2"
+blake3 = "1.5.4"
