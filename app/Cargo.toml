@@ -8,4 +8,5 @@ edition = "2021"
 [dependencies]
 arbitrage_engine = { path = "../arbitrage_engine" }
 eyre = "0.6.6"
-tokio = { version = "1.17.0", features = ["full"] }
+request_handler = { path = "../request_handler" }
+tokio = { version = "1.40.0", features = ["macros"] }

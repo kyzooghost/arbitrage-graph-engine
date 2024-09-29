@@ -1,15 +1,8 @@
 use eyre::Result;
-// use arbitrage_engine::graph::Edge;
-// use std::convert::TryFrom;
-// use std::sync::Arc;
+use request_handler::core::RequestHandler;
 
 #[tokio::main]
-async fn main() -> Result<()> {
-    println!("Hello, world");
-
-    // TODO - Set up loop that listens for messages from external process
-    // external_request_handler component, with interface and specific implementation
-    // external_request_handler.listen
-
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    RequestHandler::listen_and_serve().await?;
     Ok(())
 }

@@ -1,5 +1,6 @@
 [workspace]
 members = [
     "app",
-    "arbitrage_engine"
-, "request_handler/request_handler"]
+    "arbitrage_engine",
+    "request_handler"
+]
