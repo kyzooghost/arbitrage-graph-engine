@@ -1,7 +1,8 @@
-use super::decorated_edge::DecoratedEdge;
-use super::engine::{get_all_negative_cycles_0, get_negative_cycle_quick};
-use super::path::{DecoratedPath, Path};
-
+use crate::{
+    decorated_edge::DecoratedEdge,
+    engine::{get_all_negative_cycles_0, get_negative_cycle_quick},
+    path::{DecoratedPath, Path}
+};
 use blake3::Hash;
 use petgraph::{
     graph::{EdgeReference, Graph},
@@ -10,8 +11,7 @@ use petgraph::{
 };
 use std::collections::HashMap;
 
-trait IArbitrageService {
-    fn new() -> Self;
+pub trait IArbitrageService {
     fn upsert_path(&mut self, n0: &str, n1: &str, edge: DecoratedEdge) -> bool;
     /// Returns all arbitrages found
     fn scan_arbitrages(&self) -> Vec<DecoratedPath>;
@@ -22,7 +22,7 @@ trait IArbitrageService {
 }
 
 /// Point of contact interacting with the arbitrage functionality
-struct ArbitrageService {
+pub struct ArbitrageService {
     /// Core directed graph data structure on which we perform the algorithm
     /// &str for nodeId, f64 for edge weight
     graph: Graph<String, f64>,
@@ -37,8 +37,8 @@ struct ArbitrageService {
     decorated_edges: HashMap<EdgeIndex, DecoratedEdge>,
 }
 
-impl IArbitrageService for ArbitrageService {
-    fn new() -> Self {
+impl ArbitrageService {
+    pub fn new() -> Self {
         ArbitrageService {
             graph: Graph::new(),
             node_indexes: HashMap::new(),
@@ -48,6 +48,22 @@ impl IArbitrageService for ArbitrageService {
         }
     }
 
+    pub fn node_count(&self) -> usize {
+        self.graph.node_count()
+    }
+
+    pub fn edge_count(&self) -> usize {
+        self.graph.node_count()
+    }
+}
+
+impl Default for ArbitrageService {
+    fn default() -> Self {
+        ArbitrageService::new()
+    }
+}
+
+impl IArbitrageService for ArbitrageService {
     /// Add edge from n0 -> n1
     /// We will not add the reverse edge here - up to the client
     /// Return true if graph updated, false if not

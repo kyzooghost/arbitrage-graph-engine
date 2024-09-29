@@ -1,6 +1,7 @@
 pub mod arbitrage_service;
-pub mod decorated_edge;
-pub mod engine;
+mod arbitrage_service_test;
+mod decorated_edge;
+mod engine;
 mod engine_test;
-pub mod path;
-pub mod utils;
+mod path;
+mod utils;
