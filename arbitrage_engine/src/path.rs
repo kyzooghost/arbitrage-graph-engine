@@ -2,11 +2,14 @@ use petgraph::{
     graph::Graph,
     prelude::{EdgeIndex, NodeIndex},
 };
+use std::{cmp::Ordering, marker::PhantomData};
 
-use std::{
-    marker::PhantomData,
-    cmp::Ordering
-};
+use crate::decorated_edge::DecoratedEdge;
+
+pub struct DecoratedPath<'a> {
+    edges: Vec<&'a DecoratedEdge>,
+    nodes: Vec<&'a str>,
+}
 
 /// Represents a collection of connected graph nodes, in otherwords the arbitrage path
 #[derive(Debug)]

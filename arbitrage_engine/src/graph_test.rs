@@ -1,20 +1,9 @@
-use petgraph::{
-    graph::Graph,
-    prelude::NodeIndex,
+use super::graph::{
+    find_cycles, get_all_negative_cycles_0, get_all_negative_cycles_1,
+    get_all_negative_cycles_for_source, get_negative_cycle_for_source_quick,
+    get_negative_cycle_quick, has_cycle,
 };
-use super::{
-    graph::{
-        get_all_negative_cycles_0, 
-        get_all_negative_cycles_1, 
-        get_negative_cycle_quick,
-        get_all_negative_cycles_for_source,
-        get_negative_cycle_for_source_quick,
-        has_cycle,
-        find_cycles
-    },
-};
-
-
+use petgraph::{graph::Graph, prelude::NodeIndex};
 
 #[test]
 fn has_cycle_test_0() {
@@ -109,7 +98,6 @@ fn find_cycles_test_0() {
     let cycles = find_cycles(&graph);
     assert!(cycles.len() == 2);
 }
-
 
 // Test has_cycle() on a DAG, should not find a cycle.
 #[test]

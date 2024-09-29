@@ -1,16 +1,16 @@
 #![allow(dead_code, unused, nonstandard_style)]
 
+use super::{
+    path::Path,
+    utils::{logObject, logText},
+};
 use petgraph::{
-    graph::{Graph, EdgeReference},
+    graph::{EdgeReference, Graph},
     prelude::{EdgeIndex, NodeIndex},
-    visit::{EdgeRef},
+    visit::EdgeRef,
     Direction::Outgoing,
 };
 use std::collections::{HashMap, HashSet, VecDeque};
-use super::{
-    utils::{logObject, logText},
-    path::Path
-};
 
 /// An arbitrage path is a negative cycle in a graph where nodes are assets, and edges are exchange prices
 /// TODO - Which function for getting negative cycles is the most performant and/or produces the most useful results?
@@ -18,12 +18,15 @@ use super::{
 // Method 2 for obtaining all negative cycles, sorted from most negative to least.
 // Uses find_cycles within Bellman_Ford, cycles_found() occurs on graphs with less noise, however already O(V) factor for outer loop in function body and duplicate work from encountering the same path.
 pub fn get_all_negative_cycles_1<N: Clone>(graph: &Graph<N, f64>) -> Vec<Path<N>> {
-    let mut paths:Vec<Path<N>> = Vec::new();
+    let mut paths: Vec<Path<N>> = Vec::new();
     for node in graph.node_indices() {
         let mut cycles_found = get_all_negative_cycles_for_source(graph, node);
         paths.append(&mut cycles_found);
     }
-    let mut negative_paths: Vec<Path<N>> = paths.into_iter().filter(|path| path.weight() < 0.0).collect();
+    let mut negative_paths: Vec<Path<N>> = paths
+        .into_iter()
+        .filter(|path| path.weight() < 0.0)
+        .collect();
     negative_paths.sort_unstable();
     negative_paths.dedup_by(|a, b| a.weight().to_bits() == b.weight().to_bits());
     negative_paths
@@ -33,7 +36,10 @@ pub fn get_all_negative_cycles_1<N: Clone>(graph: &Graph<N, f64>) -> Vec<Path<N>
 // Uses find_cycles() on unfiltered graph, may suffer noise in the graph.
 pub fn get_all_negative_cycles_0<N: Clone>(graph: &Graph<N, f64>) -> Vec<Path<N>> {
     let paths = find_cycles(graph);
-    let mut negative_paths: Vec<Path<N>> = paths.into_iter().filter(|path| path.weight() < 0.0).collect();
+    let mut negative_paths: Vec<Path<N>> = paths
+        .into_iter()
+        .filter(|path| path.weight() < 0.0)
+        .collect();
     negative_paths.sort_unstable();
     negative_paths
 }
@@ -50,13 +56,16 @@ pub fn get_negative_cycle_quick<N: Clone>(graph: &Graph<N, f64>) -> (bool, Optio
 }
 
 // Modified queue-based Bellman-Ford algorithm. Only difference with get_negative_cycle_for_source_quick is that we call find_cycles() after a successful has_cycle() call.
-pub fn get_all_negative_cycles_for_source<N: Clone>(graph: &Graph<N, f64>, source: NodeIndex) -> Vec<Path<N>> {
+pub fn get_all_negative_cycles_for_source<N: Clone>(
+    graph: &Graph<N, f64>,
+    source: NodeIndex,
+) -> Vec<Path<N>> {
     // Node => Weight of current shortest path from source.
     let mut dist: HashMap<NodeIndex, f64> = HashMap::new();
     // Node => Edge in current shortest path with node as target_node.
     let mut edgeTo: HashMap<NodeIndex, Option<EdgeReference<f64>>> = HashMap::new();
     let mut queue: VecDeque<NodeIndex> = VecDeque::new();
-    let mut on_queue: HashMap<NodeIndex, bool>= HashMap::new();
+    let mut on_queue: HashMap<NodeIndex, bool> = HashMap::new();
     // Counter of relax operations
     let mut counter = 0;
 
@@ -123,13 +132,16 @@ pub fn get_all_negative_cycles_for_source<N: Clone>(graph: &Graph<N, f64>, sourc
 }
 
 // Modified queue-based Bellman-Ford algorithm. O(E) practically, O(V * E) theoretically.
-pub fn get_negative_cycle_for_source_quick<N: Clone>(graph: &Graph<N, f64>, source: NodeIndex) -> (bool, Option<Path<N>>) {
+pub fn get_negative_cycle_for_source_quick<N: Clone>(
+    graph: &Graph<N, f64>,
+    source: NodeIndex,
+) -> (bool, Option<Path<N>>) {
     // Node => Weight of current shortest path from source.
     let mut dist: HashMap<NodeIndex, f64> = HashMap::new();
     // Node => Edge in current shortest path with node as target_node.
     let mut edgeTo: HashMap<NodeIndex, Option<EdgeReference<f64>>> = HashMap::new();
     let mut queue: VecDeque<NodeIndex> = VecDeque::new();
-    let mut on_queue: HashMap<NodeIndex, bool>= HashMap::new();
+    let mut on_queue: HashMap<NodeIndex, bool> = HashMap::new();
     // Counter of relax operations
     let mut counter = 0;
 
@@ -183,9 +195,9 @@ pub fn get_negative_cycle_for_source_quick<N: Clone>(graph: &Graph<N, f64>, sour
                     }
 
                     let (cycle_found, spt_cycle) = has_cycle(&spt);
-                    
-                    if cycle_found { 
-                        return (cycle_found, spt_cycle); 
+
+                    if cycle_found {
+                        return (cycle_found, spt_cycle);
                     }
                 }
             }
@@ -259,7 +271,7 @@ fn _has_cycle_dfs<N: Clone>(
             let mut new_cycle: Path<N> = Path::new(target);
             let mut edgeStack: Vec<EdgeIndex> = vec![edgeId];
 
-            // Fill edgeStack with cycle edges, going backwards                    
+            // Fill edgeStack with cycle edges, going backwards
             loop {
                 let most_recent_edge = &graph.edge_endpoints(*edgeStack.last().unwrap()).unwrap();
                 let most_recent_edge_from = most_recent_edge.0;
@@ -382,7 +394,12 @@ fn _find_cycles_circuit<N: Clone>(
             }
 
             // Cycle contains all nodes in the cycle, but is missing an edge.
-            let final_edge = graph.find_edge(*cycle.nodes().last().unwrap(), *cycle.nodes().first().unwrap()).unwrap();
+            let final_edge = graph
+                .find_edge(
+                    *cycle.nodes().last().unwrap(),
+                    *cycle.nodes().first().unwrap(),
+                )
+                .unwrap();
             cycle.add_to_path(graph, final_edge);
 
             cycles.push(cycle);
