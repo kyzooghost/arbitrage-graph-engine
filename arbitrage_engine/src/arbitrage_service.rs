@@ -1,5 +1,7 @@
 use super::decorated_edge::DecoratedEdge;
-use super::path::DecoratedPath;
+use super::engine::{get_all_negative_cycles_0, get_negative_cycle_quick};
+use super::path::{DecoratedPath, Path};
+
 use blake3::Hash;
 use petgraph::{
     graph::{EdgeReference, Graph},
@@ -11,7 +13,12 @@ use std::collections::HashMap;
 trait IArbitrageService {
     fn new() -> Self;
     fn upsert_path(&mut self, n0: &str, n1: &str, edge: DecoratedEdge) -> bool;
-    fn scan_arbitrages(&self) -> Option<DecoratedPath>;
+    /// Returns all arbitrages found
+    fn scan_arbitrages(&self) -> Vec<DecoratedPath>;
+    /// Stops at first arbitrage found
+    fn scan_arbitrages_quick(&self) -> Vec<DecoratedPath>;
+    fn _decorate_paths(&self, path: Vec<Path<String>>) -> Vec<DecoratedPath>;
+    // TODO - Provide streaming API for scan_arbitrages, so that we can use results as they become available without having to wait for entire algorithm to run
 }
 
 /// Point of contact interacting with the arbitrage functionality
@@ -139,7 +146,35 @@ impl IArbitrageService for ArbitrageService {
         }
     }
 
-    fn scan_arbitrages(&self) -> Option<DecoratedPath> {
-        None
+    fn scan_arbitrages_quick(&self) -> Vec<DecoratedPath> {
+        let (_, path_option) = get_negative_cycle_quick(&self.graph);
+        match path_option {
+            None => Vec::new(),
+            Some(path) => Self::_decorate_paths(self, vec![path]),
+        }
+    }
+
+    fn scan_arbitrages(&self) -> Vec<DecoratedPath> {
+        let path = get_all_negative_cycles_0(&self.graph);
+        return Self::_decorate_paths(self, path);
+    }
+
+    fn _decorate_paths(&self, path_collection: Vec<Path<String>>) -> Vec<DecoratedPath> {
+        let edge_index_to_decorated_edge =
+            |index: EdgeIndex| self.decorated_edges.get(&index).unwrap();
+
+        let node_index_to_node = |index: NodeIndex| self.nodes.get(&index).unwrap();
+
+        path_collection
+            .into_iter()
+            .map(|path| DecoratedPath {
+                edges: path
+                    .edges()
+                    .into_iter()
+                    .map(edge_index_to_decorated_edge)
+                    .collect(),
+                nodes: path.nodes().into_iter().map(node_index_to_node).collect(),
+            })
+            .collect::<Vec<DecoratedPath>>()
     }
 }

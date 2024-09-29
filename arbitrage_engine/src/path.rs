@@ -7,8 +7,8 @@ use std::{cmp::Ordering, marker::PhantomData};
 use crate::decorated_edge::DecoratedEdge;
 
 pub struct DecoratedPath<'a> {
-    edges: Vec<&'a DecoratedEdge>,
-    nodes: Vec<&'a str>,
+    pub edges: Vec<&'a DecoratedEdge>,
+    pub nodes: Vec<&'a String>,
 }
 
 /// Represents a collection of connected graph nodes, in otherwords the arbitrage path
