@@ -18,17 +18,14 @@ impl RequestHandler {
         println!("Preparing IPC endpoint at {}", ipc_filepath);
         if fs::metadata(&ipc_filepath).is_ok() {
             fs::remove_file(&ipc_filepath)?;
-            println!("Existing IPC file at {}...removing", ipc_filepath);
+            println!("Removing existing IPC file at {}", ipc_filepath);
         }
 
-        println!("Starting API server");
-        let mut socket = zeromq::ReqSocket::new();
+        let mut socket = zeromq::RepSocket::new();
         socket.bind(&ipc_endpoint).await?;
-
+        println!("API server started");
         loop {
-            println!("Sup");
             let mut repl: String = socket.recv().await?.try_into()?;
-            println!("Sup2");
             dbg!(&repl);
             repl.push_str(" Reply");
             socket.send(repl.into()).await?;
