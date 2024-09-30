@@ -2,3 +2,4 @@
 .env
 .replit
 replit.nix
+.DS_Store
