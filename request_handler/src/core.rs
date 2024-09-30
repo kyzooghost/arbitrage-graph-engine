@@ -15,7 +15,6 @@ impl RequestHandler {
         dotenv().ok();
         let ipc_endpoint = std::env::var("IPC_ENDPOINT").unwrap();
         let ipc_filepath = ipc_endpoint[6..].to_string();
-        println!("Preparing IPC endpoint at {}", ipc_filepath);
         if fs::metadata(&ipc_filepath).is_ok() {
             fs::remove_file(&ipc_filepath)?;
             println!("Removing existing IPC file at {}", ipc_filepath);
@@ -23,7 +22,7 @@ impl RequestHandler {
 
         let mut socket = zeromq::RepSocket::new();
         socket.bind(&ipc_endpoint).await?;
-        println!("API server started");
+        println!("API server started at {}", ipc_filepath);
         loop {
             let mut repl: String = socket.recv().await?.try_into()?;
             dbg!(&repl);
